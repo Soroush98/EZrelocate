@@ -147,3 +147,17 @@ One concept, edited in more than one place. If you touch one, touch the others:
   bakes the value set at build time). **Durable fix: upgrade to apify 3.x** — which
   also drops the `pydantic<2.12` / `browserforge==1.2.3` pins. Two SDK-pin bites now;
   upgrading is overdue.
+
+### 2026-07-12 — Nightly refresh failed 6 nights straight: mark_stale vs statement_timeout
+- Root cause chain: Kijiji rate-limits (429s) shrank nightly scrape coverage → the
+  72h-unseen backlog grew → `mark_stale`'s single bulk UPDATE outgrew Supabase's
+  2-minute `statement_timeout` → rollback each night → backlog grew further
+  (self-reinforcing; 8.3k rows by 2026-07-12).
+- **Bulk UPDATEs that touch `listings.status` cost ~75ms/row** (measured): `status`
+  is in `listings_filter_idx`, so no HOT updates — every flipped row re-inserts into
+  ALL listings indexes, and the HNSW `desc_embed` index dominates. Any future bulk
+  write to an indexed listings column has the same trap.
+- Fix: `mark_stale` now batches (250 rows/UPDATE ≈ 20s, comfortably under the 2min
+  pooler timeout). Same pattern as `compute_amenity_distances`' 100-listing chunks.
+- Why record: the ~75ms/row HNSW write cost and the 2min Supabase statement_timeout
+  are invisible locally and only bite on bulk ETL writes.

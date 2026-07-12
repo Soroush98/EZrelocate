@@ -246,19 +246,34 @@ async def upsert_listings(rows: list[ScrapedListing]) -> tuple[int, int]:
     return inserted, updated
 
 
-async def mark_stale(source: str, hours: int = 72) -> int:
-    """Flip listings we haven't re-seen recently to status='stale'."""
+async def mark_stale(source: str, hours: int = 72, batch: int = 250) -> int:
+    """Flip listings we haven't re-seen recently to status='stale'.
+
+    Batched so each UPDATE stays under Supabase's 2-minute statement_timeout:
+    status is indexed, so every flipped row re-inserts into all listings
+    indexes, and the HNSW one costs ~75ms/row — 250 rows ≈ 20s.
+    """
+    total = 0
     async with connect() as conn:
-        result = await conn.execute(
-            """
-            UPDATE listings
-               SET status = 'stale'
-             WHERE source = $1
-               AND status = 'active'
-               AND last_seen_at < NOW() - ($2::int * INTERVAL '1 hour')
-            """,
-            source,
-            hours,
-        )
-    # asyncpg returns "UPDATE N"
-    return int(result.split()[-1])
+        while True:
+            result = await conn.execute(
+                """
+                UPDATE listings
+                   SET status = 'stale'
+                 WHERE id IN (
+                        SELECT id FROM listings
+                         WHERE source = $1
+                           AND status = 'active'
+                           AND last_seen_at < NOW() - ($2::int * INTERVAL '1 hour')
+                         LIMIT $3
+                       )
+                """,
+                source,
+                hours,
+                batch,
+            )
+            # asyncpg returns "UPDATE N"
+            n = int(result.split()[-1])
+            total += n
+            if n < batch:
+                return total
