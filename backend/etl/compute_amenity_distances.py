@@ -41,8 +41,10 @@ rolled AS (
 )
 UPDATE listings l
    SET amenity_distances_m = COALESCE(r.amenities, '{{}}'::jsonb)
-  FROM rolled r
- WHERE r.listing_id = l.id
+  FROM chunk_listings c
+  LEFT JOIN rolled r ON r.listing_id = c.id
+ WHERE l.id = c.id
+   AND l.amenity_distances_m IS DISTINCT FROM COALESCE(r.amenities, '{{}}'::jsonb)
 RETURNING l.id;
 """
 
@@ -60,15 +62,13 @@ async def main() -> None:
             return
         print(f"computing distances · {active_listings} active listings · {poi_count} POIs")
 
-        # Reset to empty so removed POI categories don't linger.
-        await conn.execute(
-            "UPDATE listings SET amenity_distances_m = '{}'::jsonb "
-            "WHERE status='active' AND amenity_distances_m <> '{}'::jsonb"
-        )
-
         # Chunk listings so each spatial-join query stays under Supabase's
         # pooler statement_timeout. 100 listings/chunk × ~5km radius typically
-        # finishes in 1–3s server-side.
+        # finishes in 1–3s server-side. Each chunk writes the final value in
+        # one pass — LEFT JOIN so listings with no POIs in range get '{}'
+        # (removed categories don't linger), IS DISTINCT FROM so unchanged
+        # rows are skipped (a listings write costs ~75ms in HNSW index
+        # re-insert alone; a whole-table rewrite blows the 2min timeout).
         all_ids = [r["id"] for r in await conn.fetch(
             "SELECT id FROM listings WHERE status='active' AND location IS NOT NULL ORDER BY id"
         )]
@@ -80,7 +80,7 @@ async def main() -> None:
             total_updated += len(rows)
             print(f"  {i + len(batch):4d}/{len(all_ids)}  (+{len(rows)})", flush=True)
 
-    print(f"updated {total_updated} listings in {time.time() - t0:.1f}s")
+    print(f"updated {total_updated} changed listings in {time.time() - t0:.1f}s")
 
 
 if __name__ == "__main__":

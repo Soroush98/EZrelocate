@@ -161,3 +161,19 @@ One concept, edited in more than one place. If you touch one, touch the others:
   pooler timeout). Same pattern as `compute_amenity_distances`' 100-listing chunks.
 - Why record: the ~75ms/row HNSW write cost and the 2min Supabase statement_timeout
   are invisible locally and only bite on bulk ETL writes.
+
+### 2026-07-18 — Nightly refresh failed 3 nights: compute_amenity_distances vs statement_timeout
+- Second bite of the 2026-07-12 trap, one step later in the same workflow. Once
+  `mark_stale` was batched, the nightly advanced to `compute_amenity_distances`,
+  whose "reset amenity_distances_m to '{}'" pre-pass was ONE bulk UPDATE over all
+  ~10.6k active listings. Non-HOT writes at ~75ms/row ≈ 13min → killed at 2min.
+  The spatial join itself was already chunked; only the reset pass wasn't.
+- Fix: dropped the reset pass entirely. The chunked UPDATE now LEFT JOINs the
+  chunk's listings against the rolled-up distances, so listings with no POIs in
+  range get `'{}'` in the same statement (removed categories still can't linger),
+  and `IS DISTINCT FROM` skips rows whose value is unchanged. POIs and listing
+  locations are static, so steady-state nights write almost nothing — the job
+  went from rewriting every active row twice to writing only real changes.
+- Lesson: when auditing for the statement_timeout trap, grep every `UPDATE listings`
+  in the ETL, including "cheap-looking" reset/housekeeping statements — per-row
+  index cost (~75ms, HNSW-dominated) makes row count the only thing that matters.
