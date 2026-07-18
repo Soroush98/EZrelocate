@@ -14,5 +14,6 @@ deploy is manual via `flyctl deploy`.
 
 ## Conventions
 
-- Engineering practices live in [.claude/skills/](.claude/skills/) — the
-  project-local copies take precedence over the user-level skills.
+- Engineering practices come from the public user-level Claude skills
+  (engineering-principles, fastapi-practices, python-practices, etc.) — there
+  are intentionally no project-local copies in `.claude/skills/`.
