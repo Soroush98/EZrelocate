@@ -33,6 +33,10 @@ over a continuously-refreshed national rental index.
   brokerage sponsorship.
 - **Facebook Marketplace** — auth wall + heavy anti-bot + ToS. Most FB rentals are
   duplicated to Kijiji anyway.
+- **RentFaster.ca** — works from residential IPs but Cloudflare's JS challenge
+  blocks datacenter/cloud IPs, so it's not in the nightly pipeline. The
+  standalone [apify-actor/](apify-actor/) supports it best-effort alongside
+  Kijiji in a single normalized feed.
 
 Scraping is **batch, not per-query.** A scheduled job re-scrapes Kijiji every
 night and writes the results to Postgres. User queries hit the warm
@@ -45,6 +49,7 @@ results. See [Nightly refresh](#nightly-refresh) below.
 ```
 .
 ├── .github/workflows/
+│   ├── ci.yml                           # GitHub Actions — lint + tests + typecheck
 │   ├── refresh.yml                      # GitHub Actions — nightly Kijiji refresh
 │   └── osm-pois.yml                     # GitHub Actions — weekly OSM POI load
 ├── infra/
@@ -70,11 +75,13 @@ results. See [Nightly refresh](#nightly-refresh) below.
 │   │       ├── llm.py                   # Claude parse + generate
 │   │       └── retrieval.py             # Hybrid SQL + pgvector + PostGIS
 │   ├── etl/
+│   │   ├── _common.py                   # Shared asyncpg connection helper
 │   │   ├── _scrape.py                   # PoliteClient, ScrapedListing, upsert, mark_stale
 │   │   ├── scrape_kijiji.py             # National per-city round-robin scraper
 │   │   ├── load_osm_pois_geofabrik.py   # Offline OSM POI loader (Geofabrik .pbf)
 │   │   ├── compute_amenity_distances.py # Per-listing nearest-amenity distances
 │   │   └── embed_all.py                 # Voyage backfill for active listings
+│   ├── tests/                           # Hermetic unit tests (no DB / network)
 │   └── scripts/
 │       ├── init_db.sh                   # Apply db/schema.sql
 │       └── refresh.sh                   # cron/launchd entrypoint
@@ -82,7 +89,10 @@ results. See [Nightly refresh](#nightly-refresh) below.
 │   └── src/
 │       ├── app/{layout,page}.tsx
 │       ├── components/{Map,QueryPanel,ListingCard,AccountBar,AuthModal,...}.tsx
-│       └── lib/{types,auth,supabase}.ts
+│       └── lib/{types,auth,supabase,amenityIcons}.ts
+├── apify-actor/                         # Standalone Apify actor: Kijiji + RentFaster
+│                                        #   in one normalized, deduplicated feed
+│                                        #   (own README; not part of the nightly job)
 └── .env.example
 ```
 
@@ -92,7 +102,7 @@ results. See [Nightly refresh](#nightly-refresh) below.
 
 - Docker
 - Python 3.12 + [uv](https://docs.astral.sh/uv/) (or any pip/venv tool)
-- Node 22+ (npm or pnpm)
+- Node 20+ (npm or pnpm)
 - Anthropic API key, Voyage AI API key (Voyage requires payment-method-on-file
   for usable rate limits; you still get 200M free tokens)
 
@@ -202,7 +212,7 @@ Every night the system wakes up and does three things in order:
    balanced across the country). New listings are added; listings we have seen
    before just have their "last seen" timestamp bumped. Small cities exhaust
    well before 500 and stop early, so the realistic nightly haul is around
-   7,000–8,000 listings.
+   10,000 listings.
 2. **Recompute walking distances.** For every listing, work out how far it is
    to the nearest subway, park, school, and so on. These numbers are stored
    right on the listing row, so the search side never has to compute them
@@ -220,13 +230,13 @@ the rate-limited public Overpass API, so it never gets throttled.
 Anything that has not been seen on Kijiji for 72 hours is marked `stale` and
 silently drops out of search results.
 
-**How long does it take?** Roughly 3–4 hours end-to-end. The scraper is
-intentionally polite (3 concurrent requests, ~1s jitter between them) so
+**How long does it take?** Roughly 2–2.5 hours end-to-end. The scraper is
+intentionally polite (2 concurrent requests, 0.4–1s jitter between them) so
 Kijiji does not rate-limit us. The workflow has a 5-hour safety timeout.
 
 **What if I want to crawl everything?** Kijiji has 50k+ active listings
 nationally. At polite rates that would take 10–18 hours and risk getting the
-runner's IP blocked, so we crawl a balanced 7k–8k slice each night instead.
+runner's IP blocked, so we crawl a balanced ~10k slice each night instead.
 Listings turn over slowly, so within a few nights you have effectively
 nationwide coverage of anything that has been on the market recently.
 
@@ -238,7 +248,10 @@ whole database is slow and costs money. The trick here is simple:
 - Each listing row has a vector column that starts out `NULL`.
 - The embed step (`backend/etl/embed_all.py`) only looks at rows where the
   vector is `NULL` and the listing is still active.
-- A listing is embedded once and then never again, unless its text changes.
+- A listing is embedded exactly once and then never again — even if its text
+  is later edited on Kijiji. That's a deliberate trade-off: descriptions
+  rarely change materially after posting, and skipping re-embeds keeps the
+  step cheap.
 
 So a typical night embeds the slice of listings that are genuinely new —
 usually one to two thousand rows out of an active inventory of tens of
@@ -277,7 +290,7 @@ launchd, or by hand:
 ## A note on scraping
 
 Kijiji's ToS restricts scraping. The crawler here is intentionally polite —
-3 concurrent requests, around 1 second of jitter between them, capped at a few
+2 concurrent requests, 0.4–1 second of jitter between them, capped at a few
 hundred listings per city per refresh. Please don't redistribute the data and
 don't run this at commercial scale without negotiated access. If you ever
 deploy a busy public instance, expect to need a residential-proxy provider

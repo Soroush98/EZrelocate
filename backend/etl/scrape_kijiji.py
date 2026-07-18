@@ -11,7 +11,7 @@ Caveats:
     - Kijiji's HTML changes periodically. The CSS selectors below match the
       current layout; if a release breaks them, inspect a listing page and
       update the selectors. The architecture (pagination → upsert) is stable.
-    - Be polite. Default config: 3 concurrent requests, 0.5-1.5s jitter, retries.
+    - Be polite. Default config: 2 concurrent requests, 0.4-1s jitter, retries.
     - Kijiji robots.txt is restrictive. For a personal portfolio crawl this
       is the standard gray area; do not redistribute or build a commercial
       product on this data without negotiated access.
