@@ -24,7 +24,8 @@ from the subway* — a signal no other rental scraper on Apify ships.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `sources` | array | `["kijiji","rentfaster"]` | Sites to scrape |
+| `country` | string | `"CA"` | Which country's market to scrape. Currently Canada; the pipeline is country-aware and US/UK/AU are on the roadmap |
+| `sources` | array | all for the country | Sites to scrape |
 | `cities` | array | `[]` (all) | City names, e.g. `["Toronto","Calgary"]` |
 | `maxPerCity` | int | `100` | Cap per city, per source |
 | `dedupe` | bool | `true` | Merge cross-source duplicates |
@@ -94,7 +95,9 @@ Each dataset item (empty fields omitted):
   "postal_code": "M5V 1J5",
   "lat": 43.6453,
   "lng": -79.3806,
+  "country": "CA",
   "monthly_rent": 2450,
+  "currency": "CAD",
   "bedrooms": 2.0,
   "bathrooms": 1.0,
   "sqft": 720,
@@ -162,6 +165,10 @@ ways those terms prohibit. This Actor is provided for research and personal use.
 
 ## Roadmap
 
+- **US / UK / Australia sources.** The pipeline is already country-aware —
+  `country` input, per-country currencies (weekly UK/AU rent quotes are
+  normalized to per-month), region/postcode handling, and per-country offline
+  POI indexes — what remains is a scraper per market.
 - Facebook Marketplace + rentals.ca sources (best-effort; both are anti-bot).
 - Listing-level change tracking (price drops, relistings).
 
@@ -169,8 +176,11 @@ ways those terms prohibit. This Actor is provided for research and personal use.
 
 This repo **is** the Actor: `src/` is the code that runs on Apify
 (`python -m src`), `.actor/` holds the actor/input/dataset schemas, and the
-`Dockerfile` builds the image. `src/data/pois_ca.npz` is the bundled offline
-POI index (rebuild with `tools/build_poi_index.py`, then push).
+`Dockerfile` builds the image. `src/data/pois_<cc>.npz` are the bundled offline
+POI indexes, one per country (rebuild from Geofabrik extracts with
+`tools/build_poi_index.py --country CA` — needs `pip install osmium` — then
+push). Adding a source or country starts at the registry in
+`src/sources/__init__.py`.
 
 ```bash
 python3.12 -m venv .venv

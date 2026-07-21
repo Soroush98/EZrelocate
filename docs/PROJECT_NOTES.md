@@ -19,8 +19,13 @@ One concept, edited in more than one place. If you touch one, touch the others:
 
 - **Amenity categories:** `src/enrich.py::AMENITY_FILTERS` ↔
   `.actor/input_schema.json` (`nearAmenities` enum) ↔
-  `tools/build_poi_index.py::CATEGORIES` (and the bundled `src/data/pois_ca.npz`
+  `tools/build_poi_index.py::CATEGORIES` (and the bundled `src/data/pois_<cc>.npz`
   built from it).
+- **Countries:** `src/sources/__init__.py` (`REGISTRY`/`COUNTRIES`/`CURRENCIES`)
+  ↔ `.actor/input_schema.json` (`country` enum — only expose a country once it
+  has a source) ↔ `src/normalize.py::REGIONS` + postal patterns ↔
+  `src/data/pois_<cc>.npz` (build via `tools/build_poi_index.py --country <cc>`;
+  a missing index silently degrades enrichment to slow Overpass calls).
 
 ---
 
@@ -48,6 +53,23 @@ One concept, edited in more than one place. If you touch one, touch the others:
   `id` repeats across a building's unit types — disambiguate with the link's trailing
   `_<n>` suffix.
 - Why record: saves re-discovering the Cloudflare 403 and the exact unblock headers.
+
+### 2026-07-21 — Internationalization scaffolding (CA/US/GB/AU), no new sources yet
+- The pipeline is now country-aware end-to-end (see the country seam above);
+  adding a market = one scraper module + a registry entry + schema enum + POI
+  index. Non-obvious choices, so they don't get relitigated:
+  - **Weekly rents:** UK/AU listings quote per week; `parse_monthly_rent`
+    converts ×52/12 (letting-industry convention, not ×4). A monthly marker
+    wins when a listing quotes both ("£1,950 pcm (£450 pw)").
+  - **US/AU region codes match UPPERCASE-only** in addresses — IN, OR, ME, WA…
+    are ordinary lowercase words. CA stays case-insensitive (legacy behavior).
+  - **US ZIP = last match** in the address (5-digit house numbers exist);
+    **AU postcode anchors to end-of-string** (4 digits collide with years).
+  - **GB `province` = nation codes** (ENG/SCT/WLS/NIR) — the UK has no state
+    layer; postcodes carry the real geo signal there.
+  - `tools/build_poi_index.py` now reads Geofabrik .pbf directly (pyosmium,
+    dev-only dep) — the old backend Postgres path is gone. Verified against the
+    PEI extract. US extract set is ~12 GB of downloads; use `--cache`.
 
 ### 2026-06-27 — Apify packaging decisions
 - The actor repackages EZrelocate's scrapers as a *unified, geo-enriched* Canadian
