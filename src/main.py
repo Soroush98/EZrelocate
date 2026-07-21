@@ -214,6 +214,7 @@ async def main() -> None:
                 radius_m=radius,
                 max_enrich=int(cfg.get("maxEnrich", 200)),
                 log=Actor.log,
+                country=country,
             )
         if near_amenities:
             before = len(collected)

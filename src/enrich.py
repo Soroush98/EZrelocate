@@ -99,6 +99,7 @@ async def enrich(
     radius_m: int,
     max_enrich: int,
     log,
+    country: str = "CA",
 ) -> int:
     """Mutate listings in place, attaching amenity_distances_m. Returns count.
 
@@ -118,7 +119,7 @@ async def enrich(
             f"(raise maxEnrich to cover more)"
         )
 
-    index = get_index(log)
+    index = get_index(log, country=country)
     if index is not None:
         return _enrich_local(targets, index, radius_m)
     return await _enrich_overpass(targets, radius_m, log)

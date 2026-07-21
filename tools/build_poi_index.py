@@ -1,113 +1,276 @@
-"""Build the bundled offline POI index shipped inside the Actor image.
+"""Build a country's bundled offline POI index shipped inside the Actor image.
 
 Why: live Overpass enrichment is rate-limited (429s) and serialized at ~1s/listing
 — the slow tail of any `nearAmenities` run. POIs are static infrastructure, so we
-snapshot them once into a compact file the Actor loads at startup and queries
-in-process (see src/amenities_local.py). Sub-second for hundreds of listings, zero
-external dependency at run time.
+snapshot them once into a compact file per country the Actor loads at startup and
+queries in-process (see src/amenities_local.py). Sub-second for hundreds of
+listings, zero external dependency at run time.
 
-Source: a Postgres `pois` table of already-classified OSM POIs (historically the
-EZrelocate backend's, loaded offline from Geofabrik province extracts). We only
-need (poi_type, lat, lng) — no names/tags — so the dump is tiny (~1 MB compressed
-for all of Canada).
+Source: Geofabrik `.osm.pbf` extracts, streamed with pyosmium and classified by
+the same OSM-tag rules the EZrelocate backend used (ported from its
+etl/load_osm_pois_geofabrik.py before the backend left this repo). We only keep
+(poi_type, lat, lng) — no names/tags — so even the US dump stays small.
 
-Run (from repo root, with any venv that has asyncpg + numpy; DATABASE_URL from
-the environment or the repo-root .env):
-    .venv/bin/python tools/build_poi_index.py
+Run (any venv with numpy + httpx + `pip install osmium`; osmium is a dev-only
+dep, deliberately NOT in requirements.txt — the Actor image never parses .pbf):
+    .venv/bin/python tools/build_poi_index.py --country CA
+    .venv/bin/python tools/build_poi_index.py --country AU --pbf /path/australia.osm.pbf
 
-Re-run + `apify push` to refresh the snapshot.
+Downloads go to --cache (default: a temp dir, so pass --cache to keep them across
+runs; the US state set totals ~12 GB). Re-run + `apify push` to refresh a snapshot.
 """
 
 from __future__ import annotations
 
-import asyncio
+import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
-import asyncpg
+import httpx
 import numpy as np
 
+try:
+    import osmium
+except ImportError:
+    sys.exit("pyosmium missing — this build tool needs it: pip install osmium")
+
 # The Actor's amenity categories (must match src/enrich.AMENITY_FILTERS and the
-# input_schema `nearAmenities` enum). The source `pois` table also has `lrt`,
-# which the Actor doesn't expose, so we skip it.
-CATEGORIES = [
-    "subway", "train", "bus_stop", "grocery", "cafe", "pharmacy",
-    "park", "school", "university", "library", "gym", "hospital",
+# input_schema `nearAmenities` enum), each with Overpass-style OSM tag filters.
+# classify() checks them in declaration order and the first match wins, so e.g.
+# a subway entrance never gets labelled bus_stop. (The old backend also had an
+# `lrt` category; the Actor doesn't expose it, so it's dropped here.)
+CATEGORIES: list[tuple[str, list[str]]] = [
+    ("subway",     ['["railway"="subway_entrance"]',
+                    '["public_transport"="station"]["subway"="yes"]',
+                    '["station"="subway"]']),
+    ("train",      ['["railway"="station"]["station"!="subway"]["station"!="light_rail"]',
+                    '["railway"="halt"]']),
+    ("bus_stop",   ['["highway"="bus_stop"]']),
+    ("grocery",    ['["shop"="supermarket"]',
+                    '["shop"="convenience"]']),
+    ("cafe",       ['["amenity"="cafe"]',
+                    '["shop"="coffee"]']),
+    ("pharmacy",   ['["amenity"="pharmacy"]']),
+    ("park",       ['["leisure"="park"]',
+                    '["leisure"="playground"]']),
+    ("school",     ['["amenity"="school"]',
+                    '["amenity"="kindergarten"]',
+                    '["amenity"="childcare"]']),
+    ("university", ['["amenity"="university"]',
+                    '["amenity"="college"]']),
+    ("library",    ['["amenity"="library"]']),
+    ("gym",        ['["leisure"="fitness_centre"]',
+                    '["leisure"="sports_centre"]']),
+    ("hospital",   ['["amenity"="hospital"]',
+                    '["amenity"="clinic"]']),
 ]
 
-OUT_NPZ = Path(__file__).resolve().parents[1] / "src" / "data" / "pois_ca.npz"
-OUT_META = OUT_NPZ.with_suffix(".meta.json")
+GEOFABRIK = "https://download.geofabrik.de"
 
-# rows pulled per category; lat/lng only, dropping anything without a location.
-SQL = """
-    SELECT ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lng
-      FROM pois
-     WHERE poi_type = $1 AND location IS NOT NULL
-"""
+# Country -> Geofabrik extract paths. Multi-file sets (CA provinces, US states)
+# keep peak RAM/disk bounded vs. one continent-scale file.
+EXTRACTS: dict[str, list[str]] = {
+    "CA": [
+        f"north-america/canada/{slug}" for slug in (
+            "alberta", "british-columbia", "manitoba", "new-brunswick",
+            "newfoundland-and-labrador", "northwest-territories", "nova-scotia",
+            "nunavut", "ontario", "prince-edward-island", "quebec",
+            "saskatchewan", "yukon",
+        )
+    ],
+    "US": [
+        f"north-america/us/{slug}" for slug in (
+            "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+            "connecticut", "delaware", "district-of-columbia", "florida",
+            "georgia", "hawaii", "idaho", "illinois", "indiana", "iowa",
+            "kansas", "kentucky", "louisiana", "maine", "maryland",
+            "massachusetts", "michigan", "minnesota", "mississippi", "missouri",
+            "montana", "nebraska", "nevada", "new-hampshire", "new-jersey",
+            "new-mexico", "new-york", "north-carolina", "north-dakota", "ohio",
+            "oklahoma", "oregon", "pennsylvania", "rhode-island",
+            "south-carolina", "south-dakota", "tennessee", "texas", "utah",
+            "vermont", "virginia", "washington", "west-virginia", "wisconsin",
+            "wyoming",
+        )
+    ],
+    "GB": ["europe/united-kingdom"],
+    "AU": ["australia-oceania/australia"],
+}
+
+# Disk-backed node-location index so a big extract can't blow RAM while we
+# resolve way geometries.
+_INDEX_TYPE = "sparse_file_array"
 
 
-def _load_database_url() -> str:
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        # Fall back to the repo-root .env.
-        env = Path(__file__).resolve().parents[1] / ".env"
-        for line in env.read_text().splitlines() if env.exists() else []:
-            if line.startswith("DATABASE_URL="):
-                url = line.split("=", 1)[1].strip().strip('"').strip("'")
-                break
-    if not url:
-        sys.exit("DATABASE_URL not set (env or repo-root .env)")
-    return url
+def classify(tags: dict[str, str]) -> str | None:
+    for poi_type, stanzas in CATEGORIES:
+        for stanza in stanzas:
+            if _stanza_matches(stanza, tags):
+                return poi_type
+    return None
 
 
-async def main() -> None:
-    url = _load_database_url()
-    conn = await asyncpg.connect(url)
-    arrays: dict[str, np.ndarray] = {}
-    counts: dict[str, int] = {}
-    try:
-        for cat in CATEGORIES:
-            rows = await conn.fetch(SQL, cat)
-            # [N, 2] float32 (lat, lng). float32 keeps ~0.5 m precision at city
-            # scale and halves the bundle size.
-            arr = np.array([(r["lat"], r["lng"]) for r in rows], dtype=np.float32)
-            if arr.size == 0:
-                arr = np.empty((0, 2), dtype=np.float32)
-            arrays[cat] = arr
-            counts[cat] = len(rows)
-            print(f"  {cat:12} {len(rows):>7}")
-    finally:
-        await conn.close()
+def _stanza_matches(stanza: str, tags: dict[str, str]) -> bool:
+    """Parse a filter like '["amenity"="cafe"]' and check tags.
 
-    OUT_NPZ.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(OUT_NPZ, **arrays)
+    Supports k="v" equality and k!="v" inequality (no regex, no fancy stuff).
+    """
+    for raw in stanza.strip("[]").split("]["):
+        if "!=" in raw:
+            k, v = raw.split("!=", 1)
+            if tags.get(k.strip('"')) == v.strip('"'):
+                return False
+        elif "=" in raw:
+            k, v = raw.split("=", 1)
+            if tags.get(k.strip('"')) != v.strip('"'):
+                return False
+        elif raw.strip('"') not in tags:  # tag-presence only, e.g. ["wheelchair"]
+            return False
+    return True
 
-    total = sum(counts.values())
-    allpts = np.concatenate([a for a in arrays.values() if len(a)]) if total else np.empty((0, 2))
-    bbox = (
-        {
-            "lat": [float(allpts[:, 0].min()), float(allpts[:, 0].max())],
-            "lng": [float(allpts[:, 1].min()), float(allpts[:, 1].max())],
-        }
-        if total
-        else None
-    )
+
+class _POIHandler(osmium.SimpleHandler):
+    """Collect classified POI coordinates from nodes and ways.
+
+    Ways (parks, schools, hospitals mapped as polygons) get a centroid averaged
+    from their node coordinates — exact enough for amenity-proximity scoring.
+    Relations are skipped: almost all POIs we care about are nodes or single
+    closed ways. `seen` is shared across extracts so border overlaps between
+    adjacent Geofabrik files don't double-count an element.
+    """
+
+    def __init__(self, coords: dict[str, list[tuple[float, float]]], seen: set) -> None:
+        super().__init__()
+        self.coords = coords
+        self.seen = seen
+
+    def node(self, n) -> None:
+        if n.location.valid():
+            self._consider(n.tags, ("n", n.id), n.location.lat, n.location.lon)
+
+    def way(self, w) -> None:
+        try:
+            pts = [(nd.lat, nd.lon) for nd in w.nodes if nd.location.valid()]
+        except osmium.InvalidLocationError:
+            pts = []
+        if not pts:
+            return
+        lat = sum(p[0] for p in pts) / len(pts)
+        lon = sum(p[1] for p in pts) / len(pts)
+        self._consider(w.tags, ("w", w.id), lat, lon)
+
+    def _consider(self, tags, key: tuple, lat: float, lon: float) -> None:
+        td = {t.k: t.v for t in tags}
+        poi_type = classify(td)
+        if poi_type and key not in self.seen:
+            self.seen.add(key)
+            self.coords[poi_type].append((lat, lon))
+
+
+def _download(path: str, dest_dir: Path) -> Path:
+    url = f"{GEOFABRIK}/{path}-latest.osm.pbf"
+    out = dest_dir / f"{path.rsplit('/', 1)[-1]}-latest.osm.pbf"
+    if out.exists() and out.stat().st_size > 0:
+        print(f"  using cached {out} ({out.stat().st_size / 1e6:.0f} MB)")
+        return out
+    print(f"  downloading {url}")
+    with httpx.stream("GET", url, follow_redirects=True, timeout=600) as r:
+        r.raise_for_status()
+        with open(out, "wb") as f:
+            for chunk in r.iter_bytes(chunk_size=1 << 20):
+                f.write(chunk)
+    print(f"  saved {out} ({out.stat().st_size / 1e6:.0f} MB)")
+    return out
+
+
+def build(country: str, pbfs: list[Path], out_npz: Path) -> None:
+    coords: dict[str, list[tuple[float, float]]] = {c: [] for c, _ in CATEGORIES}
+    seen: set = set()
+    for pbf in pbfs:
+        print(f"  extracting {pbf.name} ...")
+        handler = _POIHandler(coords, seen)
+        with tempfile.NamedTemporaryFile(suffix=".idx") as idx_file:
+            handler.apply_file(
+                str(pbf), locations=True, idx=f"{_INDEX_TYPE},{idx_file.name}"
+            )
+        print(f"    running total: {sum(len(v) for v in coords.values())} POIs")
+
+    arrays = {
+        cat: np.asarray(pts, dtype=np.float32).reshape(-1, 2)
+        for cat, pts in coords.items()
+    }
+    total = int(sum(len(a) for a in arrays.values()))
+    if not total:
+        sys.exit("no POIs extracted — wrong extract, or a broken .pbf?")
+
+    out_npz.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(out_npz, **arrays)
+    stacked = np.vstack([a for a in arrays.values() if len(a)])
     meta = {
-        "source": "EZrelocate pois table (Geofabrik-derived)",
-        "categories": CATEGORIES,
-        "counts": counts,
+        "source": f"Geofabrik {country} extracts ({len(pbfs)} file(s))",
+        "categories": [c for c, _ in CATEGORIES],
+        "counts": {cat: int(len(a)) for cat, a in arrays.items()},
         "total": total,
-        "bbox": bbox,
+        "bbox": {
+            "lat": [float(stacked[:, 0].min()), float(stacked[:, 0].max())],
+            "lng": [float(stacked[:, 1].min()), float(stacked[:, 1].max())],
+        },
         "dtype": "float32",
         "note": "Regenerate with tools/build_poi_index.py then `apify push`.",
     }
-    OUT_META.write_text(json.dumps(meta, indent=2))
-    size_kb = OUT_NPZ.stat().st_size / 1024
-    print(f"\nwrote {OUT_NPZ}  ({size_kb:.0f} KB, {total} POIs)")
-    print(f"wrote {OUT_META}")
+    out_npz.with_suffix("").with_suffix(".meta.json").write_text(
+        json.dumps(meta, indent=2) + "\n"
+    )
+    size_mb = out_npz.stat().st_size / 1e6
+    print(f"\nwrote {out_npz} ({size_mb:.1f} MB): {total} POIs")
+    for cat, a in arrays.items():
+        print(f"  {cat:<11} {len(a)}")
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    p.add_argument("--country", required=True, choices=sorted(EXTRACTS),
+                   help="ISO code of the index to build")
+    p.add_argument("--pbf", action="append", type=Path, default=[],
+                   help="local .osm.pbf file(s) to use instead of downloading; repeatable")
+    p.add_argument("--cache", type=Path,
+                   help="directory to keep downloaded extracts (default: temp, deleted)")
+    p.add_argument("--out", type=Path,
+                   help="output .npz path (default: src/data/pois_<cc>.npz)")
+    args = p.parse_args()
+
+    cc = args.country.upper()
+    out = args.out or (
+        Path(__file__).resolve().parents[1] / "src" / "data" / f"pois_{cc.lower()}.npz"
+    )
+
+    if args.pbf:
+        missing = [str(f) for f in args.pbf if not f.exists()]
+        if missing:
+            sys.exit(f"missing .pbf file(s): {missing}")
+        build(cc, args.pbf, out)
+        return
+
+    if args.cache:
+        args.cache.mkdir(parents=True, exist_ok=True)
+        cache_dir, cleanup = args.cache, None
+    else:
+        cleanup = tempfile.TemporaryDirectory(prefix="geofabrik-")
+        cache_dir = Path(cleanup.name)
+    try:
+        paths = EXTRACTS[cc]
+        print(f"=== {cc}: {len(paths)} Geofabrik extract(s) ===")
+        pbfs = [_download(path, cache_dir) for path in paths]
+        build(cc, pbfs, out)
+    finally:
+        if cleanup:
+            cleanup.cleanup()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Allow `python tools/build_poi_index.py` from anywhere; paths are absolute.
+    os.chdir(Path(__file__).resolve().parents[1])
+    main()

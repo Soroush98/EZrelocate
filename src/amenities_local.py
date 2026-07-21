@@ -1,8 +1,9 @@
-"""In-process nearest-amenity lookup against the bundled offline POI index.
+"""In-process nearest-amenity lookup against the bundled offline POI indexes.
 
 Replaces the live, rate-limited Overpass calls (see enrich.py) with a local
-nearest-neighbor query over POIs snapshotted into src/data/pois_ca.npz at build
-time (tools/build_poi_index.py). Sub-second for hundreds of listings, no network.
+nearest-neighbor query over POIs snapshotted into src/data/pois_<cc>.npz per
+country at build time (tools/build_poi_index.py). Sub-second for hundreds of
+listings, no network.
 
 Method: each POI's (lat, lng) is mapped to a 3-D unit vector on the sphere, so the
 nearest POI by great-circle distance is the one with the largest dot product with
@@ -19,7 +20,7 @@ from pathlib import Path
 import numpy as np
 
 _EARTH_R_M = 6_371_000.0
-_DATA = Path(__file__).resolve().parent / "data" / "pois_ca.npz"
+_DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
 def _to_unit_xyz(latlng: np.ndarray) -> np.ndarray:
@@ -48,7 +49,7 @@ def _haversine_m(lat1, lng1, lat2, lng2) -> np.ndarray:
 class PoiIndex:
     """Loaded once and reused; holds per-category POI coordinates + unit vectors."""
 
-    def __init__(self, path: Path = _DATA) -> None:
+    def __init__(self, path: Path) -> None:
         with np.load(path) as data:
             # cat -> (latlng [N,2] float32, xyz [N,3] float32)
             self._cats: dict[str, tuple[np.ndarray, np.ndarray]] = {}
@@ -100,25 +101,29 @@ class PoiIndex:
         return out
 
 
-_INDEX: PoiIndex | None = None
-_LOAD_FAILED = False
+# country code -> loaded index, or None when a load already failed (don't retry).
+_INDEXES: dict[str, PoiIndex | None] = {}
 
 
-def get_index(log=None) -> PoiIndex | None:
-    """Lazily load the bundled index once. Returns None (logged once) if the data
-    file is missing or unreadable, so the caller can fall back to Overpass."""
-    global _INDEX, _LOAD_FAILED
-    if _INDEX is not None or _LOAD_FAILED:
-        return _INDEX
+def get_index(log=None, country: str = "CA") -> PoiIndex | None:
+    """Lazily load the country's bundled index once. Returns None (logged once)
+    if its data file is missing or unreadable, so the caller can fall back to
+    Overpass — which is also how a country without a snapshot yet degrades."""
+    cc = (country or "CA").lower()
+    if cc in _INDEXES:
+        return _INDEXES[cc]
     try:
-        _INDEX = PoiIndex()
+        index = PoiIndex(_DATA_DIR / f"pois_{cc}.npz")
         if log:
             log.info(
-                f"[enrich] loaded bundled POI index: {_INDEX.total} POIs across "
-                f"{len(_INDEX.categories)} categories"
+                f"[enrich] loaded bundled POI index ({cc}): {index.total} POIs "
+                f"across {len(index.categories)} categories"
             )
     except Exception as e:  # noqa: BLE001 — degrade to the Overpass fallback
-        _LOAD_FAILED = True
+        index = None
         if log:
-            log.warning(f"[enrich] bundled POI index unavailable ({e!r}); using Overpass")
-    return _INDEX
+            log.warning(
+                f"[enrich] bundled POI index for {cc!r} unavailable ({e!r}); using Overpass"
+            )
+    _INDEXES[cc] = index
+    return index
