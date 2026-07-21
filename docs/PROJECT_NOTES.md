@@ -41,6 +41,12 @@ One concept, edited in more than one place. If you touch one, touch the others:
 | Facebook Marketplace | CA/US | Auth wall + heavy anti-bot; mostly dupes Kijiji | Ruled out |
 | Domain.com.au | AU | 403 even with Chrome TLS impersonation (Kasada) | Ruled out (needs headless) |
 | realestate.com.au | AU | Kasada (industry-known hard block) | Not attempted |
+| Gumtree AU | AU | 403 on first impersonated request | Ruled out (needs headless) |
+| Flatmates.com.au | AU | 429 on first request (REA-owned) | Ruled out (needs headless) |
+| rent.com.au | AU | 403 (challenge page, ~150 KB shell) | Ruled out (needs headless) |
+| Zumper | US | 200; `window.__PRELOADED_STATE__` embeds structured listables (address, city, state, lat/lng, amenity tags, urls) | **Viable — phase-3 front-runner**, see 2026-07-21 note |
+| HotPads | US | 200; `__PRELOADED_STATE__` present (Zillow-owned — higher ToS/likely-hardening risk) | Viable-looking, second choice |
+| Craigslist | US | 200 but static rows carry only title/price/city — no coords/beds; bans hard; saturated on Apify | Weak candidate |
 
 ### 2026-06-27 — RentFaster API is behind a Cloudflare managed challenge
 - Context: evaluated RentFaster as a second source (it has a clean JSON API, unlike
@@ -56,6 +62,27 @@ One concept, edited in more than one place. If you touch one, touch the others:
   `id` repeats across a building's unit types — disambiguate with the link's trailing
   `_<n>` suffix.
 - Why record: saves re-discovering the Cloudflare 403 and the exact unblock headers.
+
+### 2026-07-21 — US/AU probe round: US open (Zumper), Australia blocked wall-to-wall
+- One impersonated (curl_cffi Chrome) request per site, home IP:
+  - **AU: every major portal blocked the FIRST request** — Domain 403 (Kasada),
+    Gumtree AU 403, Flatmates 429, rent.com.au 403. AU is a different
+    architecture class (headless browser + AU residential proxies); defer until
+    there's demand, don't burn time re-probing with header tricks.
+  - **US: Zumper 200** with `window.__PRELOADED_STATE__` →
+    `currentSearch.listables` = dict of building-id → list of structured
+    records (address, city, state, lat/lng, amenity_tags, pets, phone, url;
+    prices/beds nest deeper — untangle when building the source). Parse with
+    `json.JSONDecoder().raw_decode` from the first `{` (trailing JS follows the
+    blob). Pagination hooks visible (`hasMoreListables`, `paginatedIds`) —
+    likely an XHR API behind it; dig when implementing.
+  - **HotPads 200** with `__PRELOADED_STATE__` (Zillow-owned; expect harder
+    ToS posture / future hardening). **Craigslist 200** but the static page
+    only carries title/price/city per row — no coords/beds — and CL is
+    ban-happy + saturated on Apify.
+- Phase-3 recommendation: US via Zumper first. US POI extract set is ~12 GB of
+  Geofabrik downloads (51 files) — the parse is fast now, the download is the
+  long pole; cache it.
 
 ### 2026-07-21 — pyosmium trap: SimpleHandler callbacks fire per NODE, not per POI
 - The first GB index build ran 2h40m without finishing: `SimpleHandler.node()`
