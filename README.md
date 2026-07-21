@@ -1,297 +1,171 @@
-# EZrelocate
+# Kijiji & RentFaster Scraper — Canada Rental Listings + Geo Data 🇨🇦🏠
 
-Canada-wide rental search. You describe what you're looking for in plain English;
-the system returns real rental listings on a map, with reasoning that cites each
-pick by id.
+One **normalized, deduplicated** feed of Canadian rental listings from **Kijiji**
+and **RentFaster.ca**, with optional **nearest-amenity distances** (transit,
+grocery, school, …) attached to every listing.
 
-The interesting part isn't the chat — it's the hybrid retrieval pipeline running
-over a continuously-refreshed national rental index.
+Most rental scrapers give you one site in that site's own ad-hoc shape. This
+Actor gives you **all sources in a single schema**, collapses the same unit
+posted to multiple sites into one row, and can tell you *how far each place is
+from the subway* — a signal no other rental scraper on Apify ships.
 
-![EZrelocate architecture](architecture.png)
+## Why this is different
 
-## Stack
-
-| Layer | Choice |
-|---|---|
-| DB | Postgres 17 + PostGIS 3 + pgvector |
-| Backend | FastAPI 0.136 (Python 3.12), asyncpg |
-| LLM | Anthropic SDK 0.102 — Claude for query parsing + recommendation generation |
-| Embeddings | Voyage AI `voyage-3-large` (1024-dim) |
-| Frontend | Next.js 16.2 + React 19 + Tailwind v4 + MapLibre GL 5 (Carto Voyager basemap) |
-| Scraper | httpx + selectolax, polite rate-limited, per-city round-robin |
-
-## Data sources
-
-| Source | Coverage | Why |
+| | Typical single-site scraper | This Actor |
 |---|---|---|
-| **Kijiji** | National apartments + houses for rent (~54k inventory) | High volume, plain-HTTP scrapable, structured data in Apollo cache (`__NEXT_DATA__` → `__APOLLO_STATE__.RealEstateListing:<id>`) |
+| Sources | One | Kijiji + RentFaster (more coming) |
+| Schema | Per-site, ad-hoc | One unified schema across sources |
+| Duplicates | You dedupe yourself | Cross-source dedup built in (`also_on`) |
+| Location intelligence | Lat/lng only | Nearest-amenity distances, **included free** |
 
-**Tried and rejected:**
-- **rentals.ca** — Cloudflare bot challenge (HTTP 403 + JS-required Turnstile).
-  Needs Playwright or a paid proxy.
-- **Realtor.ca / CREA DDF** — Cloudflare-blocked, ToS-prohibited, requires licensed
-  brokerage sponsorship.
-- **Facebook Marketplace** — auth wall + heavy anti-bot + ToS. Most FB rentals are
-  duplicated to Kijiji anyway.
-- **RentFaster.ca** — works from residential IPs but Cloudflare's JS challenge
-  blocks datacenter/cloud IPs, so it's not in the nightly pipeline. The
-  standalone [apify-actor/](apify-actor/) supports it best-effort alongside
-  Kijiji in a single normalized feed.
+## Input
 
-Scraping is **batch, not per-query.** A scheduled job re-scrapes Kijiji every
-night and writes the results to Postgres. User queries hit the warm
-pgvector / PostGIS index, so the chat side never waits on the network. Listings
-not re-seen in 72 hours auto-flip to `status='stale'` and stop appearing in
-results. See [Nightly refresh](#nightly-refresh) below.
+**Scope**
 
-## Repository layout
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `sources` | array | `["kijiji","rentfaster"]` | Sites to scrape |
+| `cities` | array | `[]` (all) | City names, e.g. `["Toronto","Calgary"]` |
+| `maxPerCity` | int | `100` | Cap per city, per source |
+| `dedupe` | bool | `true` | Merge cross-source duplicates |
 
-```
-.
-├── .github/workflows/
-│   ├── ci.yml                           # GitHub Actions — lint + tests + typecheck
-│   ├── refresh.yml                      # GitHub Actions — nightly Kijiji refresh
-│   └── osm-pois.yml                     # GitHub Actions — weekly OSM POI load
-├── infra/
-│   ├── Dockerfile                       # postgres:17-bookworm + postgis + pgvector
-│   ├── docker-compose.yml
-│   └── init/01-extensions.sql           # CREATE EXTENSION postgis, vector, pg_trgm
-├── db/
-│   └── schema.sql                       # single source of truth: listings, pois,
-│                                        #   auth/billing/usage (+ HNSW & GIST indexes)
-├── backend/
-│   ├── pyproject.toml
-│   ├── app/
-│   │   ├── main.py                      # FastAPI app + lifespan
-│   │   ├── config.py                    # pydantic-settings
-│   │   ├── db.py                        # asyncpg pool
-│   │   ├── models.py                    # Pydantic request/response types
-│   │   ├── routes/                      # query, billing, nearby, stats
-│   │   └── services/
-│   │       ├── auth.py                  # Supabase JWT verify + client IP
-│   │       ├── quota.py                 # per-tier query quota gates
-│   │       ├── query_log.py             # full-text query logging
-│   │       ├── embeddings.py            # Voyage AI wrapper
-│   │       ├── llm.py                   # Claude parse + generate
-│   │       └── retrieval.py             # Hybrid SQL + pgvector + PostGIS
-│   ├── etl/
-│   │   ├── _common.py                   # Shared asyncpg connection helper
-│   │   ├── _scrape.py                   # PoliteClient, ScrapedListing, upsert, mark_stale
-│   │   ├── scrape_kijiji.py             # National per-city round-robin scraper
-│   │   ├── load_osm_pois_geofabrik.py   # Offline OSM POI loader (Geofabrik .pbf)
-│   │   ├── compute_amenity_distances.py # Per-listing nearest-amenity distances
-│   │   └── embed_all.py                 # Voyage backfill for active listings
-│   ├── tests/                           # Hermetic unit tests (no DB / network)
-│   └── scripts/
-│       ├── init_db.sh                   # Apply db/schema.sql
-│       └── refresh.sh                   # cron/launchd entrypoint
-├── frontend/                            # Next.js 16 · Tailwind v4 · MapLibre · Geist
-│   └── src/
-│       ├── app/{layout,page}.tsx
-│       ├── components/{Map,QueryPanel,ListingCard,AccountBar,AuthModal,...}.tsx
-│       └── lib/{types,auth,supabase,amenityIcons}.ts
-├── apify-actor/                         # Standalone Apify actor: Kijiji + RentFaster
-│                                        #   in one normalized, deduplicated feed
-│                                        #   (own README; not part of the nightly job)
-└── .env.example
-```
+**Filters** (all optional — applied cheapest-first)
 
-## Run it locally
+| Field | Type | Notes |
+|---|---|---|
+| `minRent` / `maxRent` | int | Monthly rent bounds, e.g. `maxRent: 2500` |
+| `minBedrooms` / `maxBedrooms` | int | For exactly 2-bed, set both to `2`. `0` = include bachelor |
+| `keywords` | array | Title/description must contain **ALL** (case-insensitive). e.g. `["female"]`, `["parking","balcony"]` |
+| `excludeKeywords` | array | Drop if title/description contains **ANY**. e.g. `["no pets"]` |
+| `nearAmenities` | array | Keep listings within `maxAmenityDistanceM` of **each** type: `subway, train, bus_stop, grocery, cafe, pharmacy, park, school, university, library, gym, hospital`. Auto-enables enrichment |
+| `maxAmenityDistanceM` | int | Default `800` (≈10-min walk) |
+| `nearAddress` | string | A specific place to anchor on, e.g. `"200 Bay St, Toronto"`. Geocoded, then listings kept within `nearAddressRadiusM`. **Use this for "near my workplace"** |
+| `nearAddressRadiusM` | int | Default `2000` |
 
-### 0. Prereqs
+**Enrichment & infra**
 
-- Docker
-- Python 3.12 + [uv](https://docs.astral.sh/uv/) (or any pip/venv tool)
-- Node 20+ (npm or pnpm)
-- Anthropic API key, Voyage AI API key (Voyage requires payment-method-on-file
-  for usable rate limits; you still get 200M free tokens)
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `enrichAmenities` | bool | `false` | Attach `amenity_distances_m` even without a `nearAmenities` filter (fast, free) |
+| `enrichRadiusM` | int | `1500` | Amenity search radius |
+| `maxEnrich` | int | `200` | Cap on listings enriched per run |
+| `proxyConfiguration` | object | Apify Proxy on | **Recommended** — see below |
 
-### 1. Bring up the database
-
-```bash
-cp .env.example .env       # fill in keys
-cd infra && docker compose up -d --build
-cd ..
-./backend/scripts/init_db.sh   # applies db/schema.sql
-```
-
-### 2. Install the backend
-
-```bash
-cd backend
-uv venv && source .venv/bin/activate
-uv pip install -e .
-```
-
-### 3. First crawl (~30–60 min for ~4,400 balanced listings)
-
-```bash
-# Dry-run first — confirms the parser still matches Kijiji's __NEXT_DATA__ shape.
-python -m etl.scrape_kijiji --per-city 2 --dry-run
-
-# Real crawl — round-robin across 22 cities, ~250 each.
-python -m etl.scrape_kijiji --per-city 250
-
-# Embed everything (needs VOYAGE_API_KEY in .env).
-python -m etl.embed_all
-```
-
-### 4. Start the API
-
-```bash
-uvicorn app.main:app --reload
-# http://localhost:8000/health
-# http://localhost:8000/docs
-```
-
-### 5. Start the frontend
-
-```bash
-cd ../frontend
-npm install
-npm run dev
-# http://localhost:3000
-```
-
-### 6. Schedule the nightly refresh
-
-See the [Nightly refresh](#nightly-refresh) section below for the full
-explanation. In short: GitHub Actions runs the pipeline every night for free;
-you only need to add a few secrets to the repo.
-
-## API
-
-`POST /api/query`
+Examples:
 
 ```json
-{ "query": "Toronto, $2500/mo, 1 bedroom, pet-friendly, near a subway station" }
+// minimal
+{ "sources": ["kijiji", "rentfaster"], "cities": ["Toronto"], "maxPerCity": 50 }
+
+// "2-bed under $2500 in Toronto, near a subway, female-only"
+{
+  "cities": ["Toronto"], "minBedrooms": 2, "maxBedrooms": 2,
+  "maxRent": 2500, "nearAmenities": ["subway"], "maxAmenityDistanceM": 800,
+  "keywords": ["female"]
+}
+
+// "1-bed within 2 km of my office at 200 Bay St"
+{ "cities": ["Toronto"], "maxBedrooms": 1, "nearAddress": "200 Bay St, Toronto", "nearAddressRadiusM": 2000 }
 ```
 
-Response:
+### "Near X" — two different mechanisms
+
+- **Near a *type* of place** (subway, grocery, university…) → `nearAmenities`. Backed by OpenStreetMap; great coverage in Canadian cities.
+- **Near a *specific* place** (your office, a named landmark) → `nearAddress`. Geocoded to one point. Amenity categories can't find a specific employer (OSM may not have "Company X"), so use `nearAddress` for that.
+
+### Description questions (e.g. "female only", "no pets")
+
+The full `description` is always in the output. For **literal** phrases, use `keywords` / `excludeKeywords` (deterministic, server-side). For **nuanced** interpretation, let an LLM read the returned descriptions — e.g. via [Apify's MCP server](https://docs.apify.com/platform/integrations/mcp), Claude can run this Actor and reason over the results in chat. Note: keyword matching is literal, so it depends on how the lister phrased it, and gender-restricted *whole-unit* ads may run into provincial human-rights rules (shared/roommate situations are typically exempt) — that's on the data, not the filter.
+
+## Output
+
+Each dataset item (empty fields omitted):
 
 ```json
 {
-  "query": "...",
-  "parsed": {
-    "city": "Toronto",
-    "province": "ON",
-    "max_rent": 2500,
-    "min_bedrooms": 1,
-    "pet_friendly": true,
-    "lifestyle_query": "near a subway station"
-  },
-  "listings": [
-    {
-      "id": 1042,
-      "source": "kijiji",
-      "url": "https://www.kijiji.ca/v-apartments-condos/.../12345",
-      "monthly_rent": 2350,
-      "bedrooms": 1, "bathrooms": 1, "sqft": 580,
-      "pet_friendly": true,
-      "utilities_included": ["heat", "water"],
-      "city": "City of Toronto", "province": "ON",
-      "lat": 43.66, "lng": -79.33,
-      "score": 0.78
-    }
-  ],
-  "reasoning": "Listing 1042 in Leslieville fits because..."
+  "source": "kijiji",
+  "also_on": ["rentfaster"],
+  "source_id": "1700123456",
+  "url": "https://www.kijiji.ca/v-apartments-condos/...",
+  "title": "Bright 2BR near subway",
+  "address": "123 King St W, Toronto, ON",
+  "city": "Toronto",
+  "province": "ON",
+  "postal_code": "M5V 1J5",
+  "lat": 43.6453,
+  "lng": -79.3806,
+  "monthly_rent": 2450,
+  "bedrooms": 2.0,
+  "bathrooms": 1.0,
+  "sqft": 720,
+  "property_type": "apartment",
+  "furnished": false,
+  "pet_friendly": true,
+  "utilities_included": ["heat", "water"],
+  "available_from": "2026-07-01",
+  "description": "…",
+  "amenity_distances_m": { "subway": 320, "grocery": 150, "park": 410 },
+  "scraped_at": "2026-06-27T12:00:00+00:00"
 }
 ```
 
-## Nightly refresh
+`bedrooms: 0.5` means bachelor/studio. `also_on` lists other sites the same
+unit was found on (only when `dedupe` is enabled).
 
-This is the part that keeps the listings fresh. It runs once a night, on its
-own, and you do not need to touch it.
+## Use it from Claude (MCP) 🤖
 
-### What it does, in plain English
+This Actor is built to be driven by an AI agent, not just a form. Connect
+**[Apify's MCP server](https://docs.apify.com/platform/integrations/mcp)** to
+Claude (Desktop, Claude Code, or any MCP client) and Claude can run it from a
+plain-English request, then reason over the results — no code.
 
-Every night the system wakes up and does three things in order:
+1. Add the hosted MCP server `https://mcp.apify.com` (OAuth), or run
+   `@apify/actors-mcp-server` locally with your `APIFY_TOKEN`.
+2. In Claude, just ask:
+   > *"Run the Canada rentals actor for Toronto — 2-bed under $2500 near a subway — and recommend the best 3."*
 
-1. **Scrape Kijiji.** Walk through 22 Canadian cities and grab up to 500
-   apartment / house listings from each (round-robin, so coverage stays
-   balanced across the country). New listings are added; listings we have seen
-   before just have their "last seen" timestamp bumped. Small cities exhaust
-   well before 500 and stop early, so the realistic nightly haul is around
-   10,000 listings.
-2. **Recompute walking distances.** For every listing, work out how far it is
-   to the nearest subway, park, school, and so on. These numbers are stored
-   right on the listing row, so the search side never has to compute them
-   live.
-3. **Embed only the new listings.** Send the brand-new listings to Voyage AI to
-   turn their text into vectors. Old listings keep the vectors they already
-   have, so this step is fast and cheap.
+Claude maps that straight onto the inputs —
+`{cities:["Toronto"], minBedrooms:2, maxBedrooms:2, maxRent:2500, nearAmenities:["subway"]}` —
+runs the Actor, reads the dataset, and answers in chat. Because the filters
+(`maxRent`, `minBedrooms`, `keywords`, `nearAmenities`, `nearAddress`) are
+pushed *into* the Actor, Claude isn't post-filtering a huge blob — it gets a
+short, correct set back. The `amenity_distances_m` field is what lets it answer
+*"near a subway / grocery / school"* precisely instead of guessing from text.
 
-The map data itself — OpenStreetMap points of interest (subway stations, parks,
-grocery stores, schools, etc.) — is static infrastructure, so it loads on a
-**separate weekly schedule** ([.github/workflows/osm-pois.yml](.github/workflows/osm-pois.yml))
-rather than every night. It reads offline Geofabrik province extracts instead of
-the rate-limited public Overpass API, so it never gets throttled.
+## Proxy — please read
 
-Anything that has not been seen on Kijiji for 72 hours is marked `stale` and
-silently drops out of search results.
+- **RentFaster.ca** sits behind a Cloudflare managed challenge that fingerprints
+  the TLS handshake, so browser-like *headers* alone get `403`. The Actor forges a
+  real Chrome TLS/HTTP2 fingerprint (via `curl_cffi`) to clear it; a **residential
+  Canadian proxy** is still recommended for a clean IP.
+- **Kijiji** rate-limits and blocks datacenter IPs aggressively.
 
-**How long does it take?** Roughly 2–2.5 hours end-to-end. The scraper is
-intentionally polite (2 concurrent requests, 0.4–1s jitter between them) so
-Kijiji does not rate-limit us. The workflow has a 5-hour safety timeout.
+Use **Apify Proxy** (residential group) for production runs. The default input
+already enables Apify Proxy.
 
-**What if I want to crawl everything?** Kijiji has 50k+ active listings
-nationally. At polite rates that would take 10–18 hours and risk getting the
-runner's IP blocked, so we crawl a balanced ~10k slice each night instead.
-Listings turn over slowly, so within a few nights you have effectively
-nationwide coverage of anything that has been on the market recently.
+## Amenity enrichment
 
-### Why the embeddings refresh is easy
+Nearest-amenity distances come from a **bundled offline POI index** — ~225k
+Canadian POIs (OpenStreetMap, via Geofabrik) shipped inside the Actor and queried
+in-process. No external API, no rate limits: enriching hundreds of listings takes
+well under a second, and it's **included free** (no per-listing enrichment charge).
+The snapshot is refreshed periodically; POIs are static infrastructure so it
+doesn't need to be live.
 
-Embeddings are the part people usually worry about, because re-embedding a
-whole database is slow and costs money. The trick here is simple:
+## Legal & fair use
 
-- Each listing row has a vector column that starts out `NULL`.
-- The embed step (`backend/etl/embed_all.py`) only looks at rows where the
-  vector is `NULL` and the listing is still active.
-- A listing is embedded exactly once and then never again — even if its text
-  is later edited on Kijiji. That's a deliberate trade-off: descriptions
-  rarely change materially after posting, and skipping re-embeds keeps the
-  step cheap.
+Scrapes only **publicly visible** listing data — no logins, no private data.
+You are responsible for your use of the output. Kijiji and RentFaster each have
+Terms of Use that restrict automated access; review them and your jurisdiction's
+rules, run politely (low concurrency, sensible caps), and don't redistribute in
+ways those terms prohibit. This Actor is provided for research and personal use.
 
-So a typical night embeds the slice of listings that are genuinely new —
-usually one to two thousand rows out of an active inventory of tens of
-thousands. That costs a handful of cents on Voyage. The first crawl is the
-only one that ever pays the full embedding bill.
+## Roadmap
 
-### Where the schedule lives
+- Facebook Marketplace + rentals.ca sources (best-effort; both are anti-bot).
+- Listing-level change tracking (price drops, relistings).
 
-The schedule lives in [.github/workflows/refresh.yml](.github/workflows/refresh.yml).
-It runs on GitHub's free Actions runners every night at 09:00 UTC (around 4
-or 5 AM Eastern). You can also start a run by hand from the repo's **Actions**
-tab → **Nightly refresh** → **Run workflow**.
+---
 
-To make it work after forking the repo, add these three secrets at
-**Settings → Secrets and variables → Actions**:
-
-| Secret | Where to get it |
-|---|---|
-| `DATABASE_URL` | Your Postgres connection string (Supabase, Neon, RDS, etc.) |
-| `ANTHROPIC_API_KEY` | console.anthropic.com |
-| `VOYAGE_API_KEY` | voyageai.com |
-
-That's it. GitHub will run the job on schedule and you can watch the logs
-right in the Actions tab.
-
-### Running the refresh locally (optional)
-
-If you would rather run it on your own machine, the same pipeline lives in
-[backend/scripts/refresh.sh](backend/scripts/refresh.sh). Trigger it from cron,
-launchd, or by hand:
-
-```bash
-./backend/scripts/refresh.sh
-```
-
-## A note on scraping
-
-Kijiji's ToS restricts scraping. The crawler here is intentionally polite —
-2 concurrent requests, 0.4–1 second of jitter between them, capped at a few
-hundred listings per city per refresh. Please don't redistribute the data and
-don't run this at commercial scale without negotiated access. If you ever
-deploy a busy public instance, expect to need a residential-proxy provider
-(BrightData, Apify) to avoid IP-level rate limits.
+Built from the data pipeline behind **EZrelocate**, a Canada-wide rental
+recommender (Postgres + PostGIS + pgvector, Claude + Voyage embeddings).

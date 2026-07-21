@@ -1,31 +1,21 @@
 # Env / secrets
 .env
-.env.local
 *.pem
 
 # Python
+.venv/
 __pycache__/
 *.py[cod]
-.venv/
-venv/
 .pytest_cache/
+.mypy_cache/
 .ruff_cache/
-*.egg-info/
-dist/
-build/
 
-# Node / Next.js
-node_modules/
-.next/
-out/
-.vercel/
-*.tsbuildinfo
+# Apify local runs
+storage/
+apify_storage/
+.apify/
 
 # Editor / OS
 .DS_Store
 .idea/
 .vscode/
-
-# Data — keep raw downloads out of git; they're large and re-fetchable
-backend/data/raw/
-backend/data/cache/

@@ -1,8 +1,0 @@
-.venv/
-storage/
-apify_storage/
-__pycache__/
-*.pyc
-.apify/
-.mypy_cache/
-.ruff_cache/
