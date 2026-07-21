@@ -22,13 +22,15 @@ class Listing:
     title: str | None = None
     address: str | None = None
     city: str = ""
-    province: str = ""  # 2-letter code (ON, BC, ...)
+    province: str = ""  # region code: CA province, US state, AU state, GB nation
+    country: str = "CA"  # ISO 3166-1 alpha-2, stamped by main.py from the run input
     postal_code: str | None = None
     lat: float | None = None
     lng: float | None = None
 
     # Rental specifics
-    monthly_rent: int | None = None  # CAD/month
+    monthly_rent: int | None = None  # per calendar month, in `currency`
+    currency: str = "CAD"  # ISO 4217, follows `country`
     bedrooms: float | None = None  # 0.5 == bachelor/studio
     bathrooms: float | None = None
     sqft: int | None = None

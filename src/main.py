@@ -22,7 +22,7 @@ from .filters import passes_amenities, passes_basic, within_point
 from .geocode import geocode
 from .models import Listing
 from .polite_client import DEFAULT_USER_AGENT, PoliteClient
-from .sources import COUNTRIES, REGISTRY, resolve_sources
+from .sources import COUNTRIES, CURRENCIES, REGISTRY, resolve_sources
 
 
 def _opt_int(cfg: dict, key: str) -> int | None:
@@ -149,6 +149,8 @@ async def main() -> None:
                 async for listing in REGISTRY[name].scrape(
                     client, cities=cities, max_per_city=max_per_city, log=Actor.log
                 ):
+                    listing.country = country
+                    listing.currency = CURRENCIES[country]
                     collected.append(listing)
             per_source[name] = len(collected) - before
         Actor.log.info(f"scraped {len(collected)} raw listings: {per_source}")

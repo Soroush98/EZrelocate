@@ -84,6 +84,34 @@ def parse_money(value: Any) -> int | None:
         return None
 
 
+# Rent-period markers. UK/AU listings habitually quote rent per week ("£450 pw",
+# "$650 per week"); CA/US quote per month. A monthly marker wins when both appear
+# ("£1,950 pcm (£450 pw)" quotes the same rent twice).
+_WEEKLY_RE = re.compile(
+    r"\b(?:p\.?/?w\b\.?|per\s*week|weekly|a\s*week|each\s*week)|/\s*w(?:ee)?k\b",
+    re.IGNORECASE,
+)
+_MONTHLY_RE = re.compile(
+    r"\b(?:pcm|p\.?/?m\b\.?|per\s*month|monthly|a\s*month)|/\s*mo(?:nth)?\b",
+    re.IGNORECASE,
+)
+
+
+def parse_monthly_rent(value: Any) -> int | None:
+    """parse_money plus rent-period detection: weekly quotes are converted to a
+    calendar-month figure (x 52/12, the letting-industry convention)."""
+    amount = parse_money(value)
+    if amount is None:
+        return None
+    if (
+        isinstance(value, str)
+        and _WEEKLY_RE.search(value)
+        and not _MONTHLY_RE.search(value)
+    ):
+        return round(amount * 52 / 12)
+    return amount
+
+
 def parse_sqft(value: Any) -> int | None:
     """Square footage may carry commentary ('about 750 sq ft'); pull the number."""
     if value is None:

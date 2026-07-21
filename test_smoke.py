@@ -28,6 +28,12 @@ def check(name, got, want):
 check("province name", N.normalise_province("British Columbia"), "BC")
 check("province code", N.normalise_province("on"), "ON")
 check("money from string", N.parse_money("$2,450/mo"), 2450)
+check("monthly rent passthrough", N.parse_monthly_rent("$2,450/mo"), 2450)
+check("monthly rent plain number", N.parse_monthly_rent("2450"), 2450)
+check("weekly rent pw", N.parse_monthly_rent("£450 pw"), 1950)
+check("weekly rent per week", N.parse_monthly_rent("$650 per week"), 2817)
+check("weekly rent /wk", N.parse_monthly_rent("450/wk"), 1950)
+check("monthly marker beats weekly", N.parse_monthly_rent("£1,950 pcm (£450 pw)"), 1950)
 check("sqft with commentary", N.parse_sqft("about 720 sq ft"), 720)
 check("bedrooms bachelor", N.bedrooms_from_text("bachelor"), 0.5)
 check("bedrooms + den", N.bedrooms_from_text("1 + Den"), 1.0)
@@ -153,6 +159,7 @@ check("to_item drops empty also_on", "also_on" in item, False)
 check("to_item drops None bedrooms", "bedrooms" in item, False)
 check("to_item has core fields", all(f in item for f in ("source", "monthly_rent", "city")), True)
 check("to_item stamps scraped_at", bool(item.get("scraped_at")), True)
+check("to_item carries country+currency", (item.get("country"), item.get("currency")), ("CA", "CAD"))
 
 # --- filters -----------------------------------------------------------------
 base = Listing(source="kijiji", source_id="f1", url="u", city="Toronto", province="ON",
