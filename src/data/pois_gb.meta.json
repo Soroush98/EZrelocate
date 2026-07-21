@@ -1,0 +1,44 @@
+{
+  "source": "Geofabrik GB extracts (1 file(s))",
+  "categories": [
+    "subway",
+    "train",
+    "bus_stop",
+    "grocery",
+    "cafe",
+    "pharmacy",
+    "park",
+    "school",
+    "university",
+    "library",
+    "gym",
+    "hospital"
+  ],
+  "counts": {
+    "subway": 968,
+    "train": 3249,
+    "bus_stop": 285973,
+    "grocery": 44373,
+    "cafe": 39741,
+    "pharmacy": 9274,
+    "park": 83364,
+    "school": 38229,
+    "university": 2175,
+    "library": 3926,
+    "gym": 12653,
+    "hospital": 4729
+  },
+  "total": 528654,
+  "bbox": {
+    "lat": [
+      49.89134216308594,
+      60.809051513671875
+    ],
+    "lng": [
+      -8.096531867980957,
+      1.7595620155334473
+    ]
+  },
+  "dtype": "float32",
+  "note": "Regenerate with tools/build_poi_index.py then `apify push`."
+}
