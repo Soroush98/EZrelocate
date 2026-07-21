@@ -165,7 +165,28 @@ ways those terms prohibit. This Actor is provided for research and personal use.
 - Facebook Marketplace + rentals.ca sources (best-effort; both are anti-bot).
 - Listing-level change tracking (price drops, relistings).
 
----
+## Development
 
-Built from the data pipeline behind **EZrelocate**, a Canada-wide rental
-recommender (Postgres + PostGIS + pgvector, Claude + Voyage embeddings).
+This repo **is** the Actor: `src/` is the code that runs on Apify
+(`python -m src`), `.actor/` holds the actor/input/dataset schemas, and the
+`Dockerfile` builds the image. `src/data/pois_ca.npz` is the bundled offline
+POI index (rebuild with `tools/build_poi_index.py`, then push).
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+.venv/bin/python test_smoke.py    # offline: parsing, dedup, filters (also runs in CI)
+.venv/bin/python live_check.py    # hits the real sites, no Apify SDK needed
+.venv/bin/python harness_e2e.py   # full pipeline against live sites, Apify calls stubbed
+
+apify push                        # deploy (manual — no CI deploy)
+```
+
+Local `live_check`/`harness_e2e` runs may see Kijiji 403s from home/datacenter
+IPs — that means "use a residential proxy", not "the code is broken"; the real
+Kijiji test is a cloud run with Apify Proxy (residential group).
+
+Before touching scrapers or dependency pins, read
+[docs/PROJECT_NOTES.md](docs/PROJECT_NOTES.md) — it records which sites are
+viable, the exact Cloudflare workarounds, and the load-bearing version pins.
