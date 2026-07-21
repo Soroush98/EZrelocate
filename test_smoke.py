@@ -12,7 +12,7 @@ from src import normalize as N
 from src.dedup import dedupe
 from src.filters import passes_amenities, passes_basic, within_point
 from src.models import Listing
-from src.sources import kijiji, rentfaster, resolve_sources, sources_for
+from src.sources import kijiji, openrent, rentfaster, resolve_sources, sources_for
 
 failures = []
 
@@ -57,9 +57,11 @@ check("available negotiable", N.parse_available("Negotiable"), None)
 
 # --- source registry ---------------------------------------------------------
 check("registry: CA sources", sorted(sources_for("CA")), ["kijiji", "rentfaster"])
+check("registry: GB sources", sources_for("GB"), ["openrent"])
 check("registry: empty request -> all for country", resolve_sources("ca", None), ["kijiji", "rentfaster"])
+check("registry: GB default", resolve_sources("GB", None), ["openrent"])
 check("registry: subset kept", resolve_sources("CA", ["kijiji"]), ["kijiji"])
-check("registry: cross-country dropped", resolve_sources("CA", ["kijiji", "zillow"]), ["kijiji"])
+check("registry: cross-country dropped", resolve_sources("CA", ["kijiji", "openrent"]), ["kijiji"])
 for bad_call, label in [
     (lambda: resolve_sources("US", None), "registry: US has no sources yet"),
     (lambda: resolve_sources("XX", None), "registry: unknown country rejected"),
@@ -149,6 +151,54 @@ check("rentfaster available", rf.available_from, _july1)
 check("rentfaster source_id unique", rf.source_id, "123456_0")
 check("rentfaster url", rf.url, "https://www.rentfaster.ca/rentals/listing/2br-king-st/123456")
 check("rentfaster skip parking", rentfaster._parse({**rf_raw, "type": "Parking Spot"}, "ON"), None)
+
+# --- openrent parse ----------------------------------------------------------
+or_html = """<script>
+var PROPERTYIDS = [ 111,222,333 ];
+var PROPERTYLISTLATITUDES = [
+51.5073,51.5074,51.5075];
+var PROPERTYLISTLONGITUDES = [
+-0.1302,-0.1303,-0.1304];
+var NUMBEROFPROPERTIES = 3;
+</script>"""
+check("openrent search arrays", openrent._parse_search_arrays(or_html),
+      [(111, 51.5073, -0.1302), (222, 51.5074, -0.1303), (333, 51.5075, -0.1304)])
+
+or_rec = {
+    "id": 222, "letAgreed": False, "title": "1 Bed Flat, Craven Street, WC2N",
+    "description": "Spacious and stylish 1-bed in central London",
+    "details": ["1 Bed", "1 Bath", "Furnished"],
+    "rentPerMonth": 2750.0, "rentPerWeek": 634.6, "isMultiRoom": False,
+}
+ol = openrent._listing_from_record(or_rec, city="London", nation="ENG", lat=51.5074, lng=-0.1303)
+check("openrent rent (site-monthly, no pw conversion)", ol.monthly_rent, 2750)
+check("openrent beds", ol.bedrooms, 1.0)
+check("openrent baths", ol.bathrooms, 1.0)
+check("openrent furnished", ol.furnished, True)
+check("openrent flat -> apartment", ol.property_type, "apartment")
+check("openrent outward postcode", ol.postal_code, "WC2N")
+check("openrent nation code", ol.province, "ENG")
+check("openrent url from id", ol.url, "https://www.openrent.co.uk/222")
+check("openrent letAgreed skipped",
+      openrent._listing_from_record({**or_rec, "letAgreed": True}, city="London", nation="ENG"), None)
+or_room = openrent._listing_from_record(
+    {**or_rec, "title": "Room in a Shared House, Hackney, E8",
+     "details": ["1 Room Available", "2 Bath", "Unfurnished"],
+     "rentPerMonth": 0.0, "maxRoomRentPerMonth": 950.0},
+    city="London", nation="ENG")
+check("openrent shared -> room", or_room.property_type, "room")
+check("openrent room beds", or_room.bedrooms, 1.0)
+check("openrent unfurnished", or_room.furnished, False)
+check("openrent HMO room rent", or_room.monthly_rent, 950)
+or_studio = openrent._listing_from_record(
+    {**or_rec, "title": "Studio Flat, London, SE1", "details": ["Studio", "1 Bath"]},
+    city="London", nation="ENG")
+check("openrent studio beds", or_studio.bedrooms, 0.5)
+or_studio2 = openrent._listing_from_record(
+    {**or_rec, "title": "Studio Flat, London, SE1", "details": ["1 Bath", "Furnished"]},
+    city="London", nation="ENG")
+check("openrent studio from title only", or_studio2.bedrooms, 0.5)
+check("openrent country+currency", (ol.country, ol.currency), ("GB", "GBP"))
 
 # --- cross-source dedup ------------------------------------------------------
 deduped, merged = dedupe([k, rf])

@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import NamedTuple
 
 from ..models import Listing
-from . import kijiji, rentfaster
+from . import kijiji, openrent, rentfaster
 
 # ISO 3166-1 alpha-2 -> display name. The pipeline is written against these;
 # only countries that also have sources below are exposed in the input schema.
@@ -30,11 +30,17 @@ CURRENCIES = {"CA": "CAD", "US": "USD", "GB": "GBP", "AU": "AUD"}
 class Source(NamedTuple):
     scrape: Callable[..., AsyncIterator[Listing]]
     country: str  # ISO 3166-1 alpha-2, key into COUNTRIES
+    # True -> the site fronts a TLS-fingerprinting Cloudflare challenge: the
+    # client needs Chrome impersonation (curl_cffi) on ONE sticky IP so the
+    # clearance cookie stays paired with the IP that earned it. False -> plain
+    # httpx with a fresh proxy IP per request (spreads per-IP rate limits).
+    sticky_tls: bool = False
 
 
 REGISTRY: dict[str, Source] = {
     "kijiji": Source(kijiji.scrape, "CA"),
-    "rentfaster": Source(rentfaster.scrape, "CA"),
+    "rentfaster": Source(rentfaster.scrape, "CA", sticky_tls=True),
+    "openrent": Source(openrent.scrape, "GB", sticky_tls=True),
 }
 
 

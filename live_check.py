@@ -8,9 +8,9 @@ Run from the repo root:
 
 NOTE: from a home/datacenter IP, Kijiji may block (403) — that means "use a
 residential proxy", not "the code is broken"; the real Kijiji test is
-`apify run`/`apify push` with Apify Proxy. RentFaster, by contrast, clears its
-Cloudflare challenge via Chrome TLS impersonation (curl_cffi) and works locally
-with no proxy, so `--source rentfaster` is a real end-to-end check here.
+`apify run`/`apify push` with Apify Proxy. Sticky-TLS sources (rentfaster,
+openrent) clear their Cloudflare challenges via Chrome TLS impersonation
+(curl_cffi) and work locally with no proxy, so those are real e2e checks here.
 """
 
 import argparse
@@ -19,23 +19,21 @@ import json
 import logging
 
 from src.polite_client import PoliteClient
-from src.sources import kijiji, rentfaster
+from src.sources import REGISTRY
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("live_check")
-
-SOURCES = {"kijiji": kijiji.scrape, "rentfaster": rentfaster.scrape}
 
 
 async def run(source: str, city: str, n: int) -> None:
     got = []
     client_kwargs = {"max_concurrency": 2, "min_delay_ms": 400, "max_delay_ms": 1000}
-    if source == "rentfaster":
-        # Chrome TLS impersonation clears RentFaster's Cloudflare challenge even from
-        # a plain home IP — so this path is testable locally without a proxy.
+    if REGISTRY[source].sticky_tls:
+        # Chrome TLS impersonation clears the Cloudflare challenge even from a
+        # plain home IP — so this path is testable locally without a proxy.
         client_kwargs["impersonate"] = "chrome"
     async with PoliteClient(**client_kwargs) as client:
-        async for listing in SOURCES[source](client, cities=[city], max_per_city=n, log=log):
+        async for listing in REGISTRY[source].scrape(client, cities=[city], max_per_city=n, log=log):
             got.append(listing)
             if len(got) >= n:
                 break
@@ -49,7 +47,7 @@ async def run(source: str, city: str, n: int) -> None:
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--source", choices=list(SOURCES), default="kijiji")
+    p.add_argument("--source", choices=list(REGISTRY), default="kijiji")
     p.add_argument("--city", default="Toronto")
     p.add_argument("--n", type=int, default=3)
     args = p.parse_args()

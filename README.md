@@ -1,20 +1,21 @@
-# Kijiji & RentFaster Scraper — Canada Rental Listings + Geo Data 🇨🇦🏠
+# Rental Listings Scraper — Canada 🇨🇦 + UK 🇬🇧 + Geo Data 🏠
 
-One **normalized, deduplicated** feed of Canadian rental listings from **Kijiji**
-and **RentFaster.ca**, with optional **nearest-amenity distances** (transit,
-grocery, school, …) attached to every listing.
+One **normalized, deduplicated** feed of rental listings — **Kijiji** and
+**RentFaster.ca** for Canada, **OpenRent** for the UK — with optional
+**nearest-amenity distances** (transit, grocery, school, …) attached to every
+listing.
 
 Most rental scrapers give you one site in that site's own ad-hoc shape. This
-Actor gives you **all sources in a single schema**, collapses the same unit
-posted to multiple sites into one row, and can tell you *how far each place is
-from the subway* — a signal no other rental scraper on Apify ships.
+Actor gives you **every source in a single schema across countries**, collapses
+the same unit posted to multiple sites into one row, and can tell you *how far
+each place is from the subway* — a signal no other rental scraper on Apify ships.
 
 ## Why this is different
 
 | | Typical single-site scraper | This Actor |
 |---|---|---|
-| Sources | One | Kijiji + RentFaster (more coming) |
-| Schema | Per-site, ad-hoc | One unified schema across sources |
+| Sources | One | Kijiji + RentFaster (CA), OpenRent (UK), more coming |
+| Schema | Per-site, ad-hoc | One unified schema across sources & countries |
 | Duplicates | You dedupe yourself | Cross-source dedup built in (`also_on`) |
 | Location intelligence | Lat/lng only | Nearest-amenity distances, **included free** |
 
@@ -24,9 +25,9 @@ from the subway* — a signal no other rental scraper on Apify ships.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `country` | string | `"CA"` | Which country's market to scrape. Currently Canada; the pipeline is country-aware and US/UK/AU are on the roadmap |
-| `sources` | array | all for the country | Sites to scrape |
-| `cities` | array | `[]` (all) | City names, e.g. `["Toronto","Calgary"]` |
+| `country` | string | `"CA"` | `CA` (Kijiji + RentFaster) or `GB` (OpenRent). US/AU on the roadmap |
+| `sources` | array | all for the country | Sites to scrape; other countries' sources are ignored |
+| `cities` | array | `[]` (all) | City names, e.g. `["Toronto","Calgary"]` or `["London","Manchester"]` |
 | `maxPerCity` | int | `100` | Cap per city, per source |
 | `dedupe` | bool | `true` | Merge cross-source duplicates |
 
@@ -113,7 +114,14 @@ Each dataset item (empty fields omitted):
 ```
 
 `bedrooms: 0.5` means bachelor/studio. `also_on` lists other sites the same
-unit was found on (only when `dedupe` is enabled).
+unit was found on (only when `dedupe` is enabled). `monthly_rent` is always a
+per-calendar-month figure in `currency` (CAD or GBP) — weekly UK quotes are
+normalized for you.
+
+**UK specifics** (`country: "GB"`, OpenRent): `province` holds the nation code
+(`ENG`/`SCT`/`WLS`/`NIR`), `postal_code` is the outward code only (`"WC2N"` —
+UK listings don't publish full postcodes before enquiry), and `description` is
+the search snippet, not the full ad text.
 
 ## Use it from Claude (MCP) 🤖
 
@@ -137,14 +145,15 @@ short, correct set back. The `amenity_distances_m` field is what lets it answer
 
 ## Proxy — please read
 
-- **RentFaster.ca** sits behind a Cloudflare managed challenge that fingerprints
-  the TLS handshake, so browser-like *headers* alone get `403`. The Actor forges a
-  real Chrome TLS/HTTP2 fingerprint (via `curl_cffi`) to clear it; a **residential
-  Canadian proxy** is still recommended for a clean IP.
+- **RentFaster.ca** and **OpenRent** sit behind Cloudflare challenges that
+  fingerprint the TLS handshake, so browser-like *headers* alone get `403`. The
+  Actor forges a real Chrome TLS/HTTP2 fingerprint (via `curl_cffi`) on a sticky
+  IP to clear them; a **residential proxy** is still recommended for a clean IP.
 - **Kijiji** rate-limits and blocks datacenter IPs aggressively.
 
-Use **Apify Proxy** (residential group) for production runs. The default input
-already enables Apify Proxy.
+Use **Apify Proxy** (residential group) for production runs, and set
+`apifyProxyCountry` to match your `country` input (`CA` or `GB`). The default
+input already enables Apify Proxy.
 
 ## Amenity enrichment
 
@@ -165,10 +174,10 @@ ways those terms prohibit. This Actor is provided for research and personal use.
 
 ## Roadmap
 
-- **US / UK / Australia sources.** The pipeline is already country-aware —
-  `country` input, per-country currencies (weekly UK/AU rent quotes are
-  normalized to per-month), region/postcode handling, and per-country offline
-  POI indexes — what remains is a scraper per market.
+- **US / Australia sources.** The pipeline is already country-aware — what
+  remains is a viable scraper per market (Australia's two big portals currently
+  hard-block automation; the US is the most saturated/anti-bot market).
+- More UK sources for cross-source dedup (OpenRent is single-source today).
 - Facebook Marketplace + rentals.ca sources (best-effort; both are anti-bot).
 - Listing-level change tracking (price drops, relistings).
 

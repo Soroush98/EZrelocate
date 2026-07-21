@@ -100,6 +100,13 @@ async def main() -> None:
             v is not None for v in (min_rent, max_rent, min_beds, max_beds)
         ) or bool(keywords or exclude_keywords)
 
+        proxy_input = cfg.get("proxyConfiguration") or {}
+        proxy_country = str(proxy_input.get("apifyProxyCountry") or "").upper()
+        if proxy_country and proxy_country != country:
+            Actor.log.warning(
+                f"proxy country {proxy_country} != run country {country} — "
+                f"expect blocks; set apifyProxyCountry to match"
+            )
         proxy_cfg = await Actor.create_proxy_configuration(
             actor_proxy_input=cfg.get("proxyConfiguration")
         )
@@ -123,18 +130,17 @@ async def main() -> None:
         per_source: dict[str, int] = {}
         for name in sources:
             before = len(collected)
-            # Per-source proxy strategy:
-            #   rentfaster -> STICKY single IP + persistent cookie jar + Chrome TLS
-            #                 impersonation (curl_cffi), so its Cloudflare cookie
-            #                 stays paired with one IP and the JA3 fingerprint clears
-            #                 the managed challenge that plain httpx is 403'd by.
-            #   kijiji     -> ROTATING IP per request (spreads load, dodges
-            #                 per-IP rate limits on a plain HTML site).
-            if name == "rentfaster":
+            # Per-source client strategy, declared in the registry:
+            #   sticky_tls -> STICKY single IP + persistent cookie jar + Chrome TLS
+            #                 impersonation (curl_cffi), so a Cloudflare clearance
+            #                 cookie stays paired with one IP and the JA3
+            #                 fingerprint clears the managed challenge that plain
+            #                 httpx is 403'd by (rentfaster, openrent).
+            #   otherwise  -> ROTATING IP per request (spreads load, dodges
+            #                 per-IP rate limits on a plain HTML site — kijiji).
+            if REGISTRY[name].sticky_tls:
                 sticky = (
-                    await proxy_cfg.new_url(session_id="rentfaster")
-                    if proxy_cfg
-                    else None
+                    await proxy_cfg.new_url(session_id=name) if proxy_cfg else None
                 )
                 proxy_kwargs = {"proxy": sticky, "impersonate": "chrome"}
             else:

@@ -6,29 +6,29 @@
     "country": {
       "title": "Country",
       "type": "string",
-      "description": "Which country's rental market to scrape. Currently Canada; the pipeline (unified schema, dedup, geo-enrichment) is country-aware and US/UK/Australia sources are on the roadmap.",
+      "description": "Which country's rental market to scrape. Sources are per-country: Canada = Kijiji + RentFaster, UK = OpenRent. US/Australia are on the roadmap. Match the proxy country below to this.",
       "editor": "select",
       "default": "CA",
-      "enum": ["CA"],
-      "enumTitles": ["Canada"]
+      "enum": ["CA", "GB"],
+      "enumTitles": ["Canada", "United Kingdom"]
     },
     "sources": {
       "title": "Sources",
       "type": "array",
-      "description": "Which rental sites to scrape.",
+      "description": "Which rental sites to scrape. Leave empty for all sources in the selected country; sources from other countries are ignored.",
       "editor": "select",
-      "default": ["kijiji", "rentfaster"],
-      "prefill": ["kijiji", "rentfaster"],
+      "default": [],
+      "prefill": [],
       "items": {
         "type": "string",
-        "enum": ["kijiji", "rentfaster"],
-        "enumTitles": ["Kijiji", "RentFaster.ca"]
+        "enum": ["kijiji", "rentfaster", "openrent"],
+        "enumTitles": ["Kijiji (CA)", "RentFaster.ca (CA)", "OpenRent (UK)"]
       }
     },
     "cities": {
       "title": "Cities",
       "type": "array",
-      "description": "City names to cover (e.g. Toronto, Calgary). Leave empty for all supported cities.",
+      "description": "City names to cover (e.g. Toronto, Calgary — or London, Manchester for the UK). Leave empty for all supported cities.",
       "editor": "stringList",
       "default": [],
       "prefill": ["Toronto", "Vancouver", "Calgary"]
@@ -193,7 +193,7 @@
     "proxyConfiguration": {
       "title": "Proxy",
       "type": "object",
-      "description": "Both Kijiji and RentFaster block datacenter IPs (Cloudflare), so this defaults to RESIDENTIAL Canadian IPs, rotated per request. Residential proxy is metered (~$8/GB) and draws from your plan credit. Switch the group to datacenter to run free, but expect intermittent blocks.",
+      "description": "All supported sites block datacenter IPs (Cloudflare), so this defaults to RESIDENTIAL IPs, rotated per request. Set apifyProxyCountry to match your Country input (CA for Canada, GB for the UK). Residential proxy is metered (~$8/GB) and draws from your plan credit. Switch the group to datacenter to run free, but expect intermittent blocks.",
       "editor": "proxy",
       "default": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"], "apifyProxyCountry": "CA" },
       "prefill": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"], "apifyProxyCountry": "CA" }

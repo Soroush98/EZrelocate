@@ -95,17 +95,24 @@ _POSTAL_GB = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b", re.IGNOREC
 _PRICE_RE = re.compile(r"[\d,]+(?:\.\d{1,2})?")
 _SQFT_RE = re.compile(r"[\d,]+")
 
+# First matching needle wins — "room" must precede "house" so UK titles like
+# "Room in a Shared House" classify as a room, not a house.
 PROPERTY_TYPE_NORMAL = {
     "apartment": "apartment",
     "condo": "condo",
     "townhouse": "townhouse",
     "town house": "townhouse",
+    "room": "room",
     "house": "house",
     "basement": "basement",
-    "room": "room",
     "duplex": "duplex",
     "main floor": "house",
     "loft": "apartment",
+    # UK terms
+    "maisonette": "apartment",
+    "flat": "apartment",
+    "studio": "apartment",
+    "bungalow": "house",
 }
 
 

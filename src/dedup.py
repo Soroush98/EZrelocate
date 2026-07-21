@@ -14,7 +14,9 @@ from __future__ import annotations
 from .models import Listing
 
 # Lower index == higher priority to be the kept (canonical) record.
-_SOURCE_PRIORITY = {"kijiji": 0, "rentfaster": 1}
+# Cross-country merges can't happen (one country per run), so ordering only
+# matters within a country's sources.
+_SOURCE_PRIORITY = {"kijiji": 0, "rentfaster": 1, "openrent": 2}
 
 
 def _key(listing: Listing) -> tuple | None:

@@ -31,13 +31,16 @@ One concept, edited in more than one place. If you touch one, touch the others:
 
 ## Data sourcing — what's viable per site
 
-| Site | Access | Status |
-|---|---|---|
-| Kijiji | Parse search-page `__NEXT_DATA__` Apollo cache (~40/req, no detail fetches) | **In use** (src/sources/kijiji.py) |
-| RentFaster.ca | **Public JSON API** `GET /api/search.json?proximity_type=location-city&novacancy=0&cur_page=N`; scope via `lastcity=<prov>/<city>` cookie. Returns `{listings, query, total, total2}` | **In use** (src/sources/rentfaster.py) — see Cloudflare note below |
-| rentals.ca | Cloudflare Turnstile → 403 | Ruled out (needs headless/paid proxy) |
-| Realtor.ca / CREA DDF | Cloudflare + ToS (licensed brokerage only) | Ruled out |
-| Facebook Marketplace | Auth wall + heavy anti-bot; mostly dupes Kijiji | Ruled out |
+| Site | Country | Access | Status |
+|---|---|---|---|
+| Kijiji | CA | Parse search-page `__NEXT_DATA__` Apollo cache (~40/req, no detail fetches) | **In use** (src/sources/kijiji.py) |
+| RentFaster.ca | CA | **Public JSON API** `GET /api/search.json?proximity_type=location-city&novacancy=0&cur_page=N`; scope via `lastcity=<prov>/<city>` cookie. Returns `{listings, query, total, total2}` | **In use** (src/sources/rentfaster.py) — see Cloudflare note below |
+| OpenRent | GB | Search page embeds ALL result ids+coords as JS arrays; details via JSON `GET /search/propertiesbyid?ids=…` | **In use** (src/sources/openrent.py) — see 2026-07-21 note |
+| rentals.ca | CA | Cloudflare Turnstile → 403 | Ruled out (needs headless/paid proxy) |
+| Realtor.ca / CREA DDF | CA | Cloudflare + ToS (licensed brokerage only) | Ruled out |
+| Facebook Marketplace | CA/US | Auth wall + heavy anti-bot; mostly dupes Kijiji | Ruled out |
+| Domain.com.au | AU | 403 even with Chrome TLS impersonation (Kasada) | Ruled out (needs headless) |
+| realestate.com.au | AU | Kasada (industry-known hard block) | Not attempted |
 
 ### 2026-06-27 — RentFaster API is behind a Cloudflare managed challenge
 - Context: evaluated RentFaster as a second source (it has a clean JSON API, unlike
@@ -53,6 +56,32 @@ One concept, edited in more than one place. If you touch one, touch the others:
   `id` repeats across a building's unit types — disambiguate with the link's trailing
   `_<n>` suffix.
 - Why record: saves re-discovering the Cloudflare 403 and the exact unblock headers.
+
+### 2026-07-21 — UK launch: OpenRent viable (and pleasant), Domain.com.au is not
+- **OpenRent two-stage JSON pipeline** (no HTML card parsing needed):
+  1. `GET /properties-to-rent/{city-slug}` embeds the ENTIRE result set as
+     parallel JS arrays — `PROPERTYIDS` + `PROPERTYLISTLATITUDES`/`LONGITUDES`
+     (London ≈ 6.1k ids on one page). One request per city buys the full
+     id→coordinate map; the 20 rendered cards are irrelevant.
+  2. `GET /search/propertiesbyid?ids=…` (repeatable param, batches of 20)
+     returns clean JSON: `title, rentPerMonth, rentPerWeek, details
+     (["2 Bed","1 Bath","Furnished"]), letAgreed, isMultiRoom,
+     maxRoomRentPerMonth`, description snippet. Param name is `ids`
+     (`propertyIds` returns `[]`, silently).
+- Cloudflare fronts it: Chrome TLS impersonation (curl_cffi) + sticky IP works
+  from a home IP with no proxy — same recipe as RentFaster. Datacenter behavior
+  on Apify untested; assume residential GB proxy for production.
+- Gotchas baked into the source: skip `letAgreed`; HMO listings carry rent in
+  `maxRoomRentPerMonth` (`rentPerMonth` is 0); `rentPerMonth` is site-computed
+  so no pw→pcm conversion; titles end in the OUTWARD postcode only ("WC2N");
+  `description` is a ~130-char snippet (full text costs a page fetch per
+  listing — not worth it); studios may lack a bed entry in `details` (fall back
+  to "studio" in the title); short URL `openrent.co.uk/{id}` 301s to canonical.
+- `openrent.co.uk/{city}` slug = lowercase-hyphenated name; verified london +
+  manchester live (3 + 2 listings parsed end-to-end via live_check).
+- **Domain.com.au: 403 on the first request** even with curl_cffi Chrome
+  impersonation (Kasada, not Cloudflare — impersonation doesn't help). AU needs
+  a headless browser or a different portal; deferred.
 
 ### 2026-07-21 — Internationalization scaffolding (CA/US/GB/AU), no new sources yet
 - The pipeline is now country-aware end-to-end (see the country seam above);
