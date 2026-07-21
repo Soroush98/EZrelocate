@@ -1,9 +1,9 @@
-"""Actor entrypoint: Canadian Rentals — Unified & Geo-Enriched.
+"""Actor entrypoint: Rentals — Unified & Geo-Enriched.
 
-Scrapes Kijiji + RentFaster into one normalized schema, applies optional filters
-(rent / beds / keywords / near-an-address / near-an-amenity), collapses
-cross-source duplicates, attaches nearest-amenity distances, then pushes the
-result to the Apify dataset.
+Scrapes the run country's sources (currently Canada: Kijiji + RentFaster) into
+one normalized schema, applies optional filters (rent / beds / keywords /
+near-an-address / near-an-amenity), collapses cross-source duplicates, attaches
+nearest-amenity distances, then pushes the result to the Apify dataset.
 
 Filters run cheapest-first so the expensive ones touch the fewest listings:
   scrape → basic (rent/beds/keywords) → dedupe → nearAddress (geocode) →
@@ -22,9 +22,7 @@ from .filters import passes_amenities, passes_basic, within_point
 from .geocode import geocode
 from .models import Listing
 from .polite_client import DEFAULT_USER_AGENT, PoliteClient
-from .sources import kijiji, rentfaster
-
-SOURCES = {"kijiji": kijiji.scrape, "rentfaster": rentfaster.scrape}
+from .sources import COUNTRIES, REGISTRY, resolve_sources
 
 
 def _opt_int(cfg: dict, key: str) -> int | None:
@@ -77,9 +75,11 @@ async def main() -> None:
     async with Actor:
         cfg = await Actor.get_input() or {}
 
-        sources = [s for s in (cfg.get("sources") or ["kijiji", "rentfaster"]) if s in SOURCES]
-        if not sources:
-            raise ValueError(f"No valid sources. Choose from: {sorted(SOURCES)}")
+        country = str(cfg.get("country") or "CA").strip().upper()
+        requested = cfg.get("sources") or None
+        sources = resolve_sources(country, requested)
+        if requested and (dropped := sorted(set(requested) - set(sources))):
+            Actor.log.warning(f"ignoring sources not available in {country}: {dropped}")
         cities = cfg.get("cities") or []
         max_per_city = int(cfg.get("maxPerCity", 100))
         do_dedupe = bool(cfg.get("dedupe", True))
@@ -108,7 +108,7 @@ async def main() -> None:
         proxy_new_url = proxy_cfg.new_url if proxy_cfg else None
 
         Actor.log.info(
-            f"sources={sources} cities={cities or 'ALL'} max_per_city={max_per_city} "
+            f"country={country} sources={sources} cities={cities or 'ALL'} max_per_city={max_per_city} "
             f"max_results={max_results} "
             f"filters(rent={min_rent}-{max_rent}, beds={min_beds}-{max_beds}, "
             f"keywords={keywords}, exclude={exclude_keywords}, "
@@ -146,7 +146,7 @@ async def main() -> None:
                 user_agent=cfg.get("userAgent") or DEFAULT_USER_AGENT,
                 **proxy_kwargs,
             ) as client:
-                async for listing in SOURCES[name](
+                async for listing in REGISTRY[name].scrape(
                     client, cities=cities, max_per_city=max_per_city, log=Actor.log
                 ):
                     collected.append(listing)
@@ -178,7 +178,7 @@ async def main() -> None:
 
         # 4. nearAddress — geocode a specific place, keep listings within radius
         if near_address:
-            point = await geocode(near_address)
+            point = await geocode(near_address, country=country.lower())
             if point:
                 before = len(collected)
                 collected = [
@@ -246,7 +246,7 @@ async def main() -> None:
         # key-value store, then surface the link in the run status. End users drive
         # the Actor from the connector/console and won't wire up anything; this gives
         # them one click to a map with clickable Kijiji/RentFaster pins, no setup.
-        map_url = await _publish_map(items)
+        map_url = await _publish_map(items, country)
 
         await Actor.set_value(
             "RUN_STATS",
@@ -269,7 +269,7 @@ async def main() -> None:
         Actor.log.info(f"done — pushed {len(items)} listings" + (f" · map: {map_url}" if map_url else ""))
 
 
-async def _publish_map(items: list[dict]) -> str | None:
+async def _publish_map(items: list[dict], country: str) -> str | None:
     """Render the run's listings to an HTML map, store it on the run's key-value
     store, and return a SIGNED public URL for the map record. Best-effort.
 
@@ -284,7 +284,8 @@ async def _publish_map(items: list[dict]) -> str | None:
         from .map_output import render_map
 
         kvs = await Actor.open_key_value_store()
-        html = render_map(items, title=f"Canada Rentals — {len(items)} listings")
+        name = COUNTRIES.get(country, country)
+        html = render_map(items, title=f"{name} Rentals — {len(items)} listings")
         await kvs.set_value("map", html, content_type="text/html; charset=utf-8")
         # Anonymously readable the instant the run ends; scoped to this record only.
         return await kvs.get_public_url("map")

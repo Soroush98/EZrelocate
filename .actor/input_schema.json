@@ -3,6 +3,15 @@
   "type": "object",
   "schemaVersion": 1,
   "properties": {
+    "country": {
+      "title": "Country",
+      "type": "string",
+      "description": "Which country's rental market to scrape. Currently Canada; the pipeline (unified schema, dedup, geo-enrichment) is country-aware and US/UK/Australia sources are on the roadmap.",
+      "editor": "select",
+      "default": "CA",
+      "enum": ["CA"],
+      "enumTitles": ["Canada"]
+    },
     "sources": {
       "title": "Sources",
       "type": "array",

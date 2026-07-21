@@ -12,7 +12,7 @@ from src import normalize as N
 from src.dedup import dedupe
 from src.filters import passes_amenities, passes_basic, within_point
 from src.models import Listing
-from src.sources import kijiji, rentfaster
+from src.sources import kijiji, rentfaster, resolve_sources, sources_for
 
 failures = []
 
@@ -35,6 +35,22 @@ check("available immediate", N.parse_available("Immediate", today=date(2026, 6, 
 check("available month-day next year",
       N.parse_available("July 1", today=date(2026, 6, 27)), date(2026, 7, 1))
 check("available negotiable", N.parse_available("Negotiable"), None)
+
+# --- source registry ---------------------------------------------------------
+check("registry: CA sources", sorted(sources_for("CA")), ["kijiji", "rentfaster"])
+check("registry: empty request -> all for country", resolve_sources("ca", None), ["kijiji", "rentfaster"])
+check("registry: subset kept", resolve_sources("CA", ["kijiji"]), ["kijiji"])
+check("registry: cross-country dropped", resolve_sources("CA", ["kijiji", "zillow"]), ["kijiji"])
+for bad_call, label in [
+    (lambda: resolve_sources("US", None), "registry: US has no sources yet"),
+    (lambda: resolve_sources("XX", None), "registry: unknown country rejected"),
+    (lambda: resolve_sources("CA", ["zillow"]), "registry: nothing usable rejected"),
+]:
+    try:
+        bad_call()
+        check(label, "no error", "ValueError")
+    except ValueError:
+        check(label, "ValueError", "ValueError")
 
 # --- kijiji search-page parse ------------------------------------------------
 apollo = {
