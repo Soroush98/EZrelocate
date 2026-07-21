@@ -12,7 +12,7 @@ from src import normalize as N
 from src.dedup import dedupe
 from src.filters import passes_amenities, passes_basic, within_point
 from src.models import Listing
-from src.sources import kijiji, openrent, rentfaster, resolve_sources, sources_for
+from src.sources import kijiji, openrent, rentfaster, resolve_sources, sources_for, zumper
 
 failures = []
 
@@ -58,12 +58,13 @@ check("available negotiable", N.parse_available("Negotiable"), None)
 # --- source registry ---------------------------------------------------------
 check("registry: CA sources", sorted(sources_for("CA")), ["kijiji", "rentfaster"])
 check("registry: GB sources", sources_for("GB"), ["openrent"])
+check("registry: US sources", sources_for("US"), ["zumper"])
 check("registry: empty request -> all for country", resolve_sources("ca", None), ["kijiji", "rentfaster"])
 check("registry: GB default", resolve_sources("GB", None), ["openrent"])
 check("registry: subset kept", resolve_sources("CA", ["kijiji"]), ["kijiji"])
 check("registry: cross-country dropped", resolve_sources("CA", ["kijiji", "openrent"]), ["kijiji"])
 for bad_call, label in [
-    (lambda: resolve_sources("US", None), "registry: US has no sources yet"),
+    (lambda: resolve_sources("AU", None), "registry: AU has no sources yet"),
     (lambda: resolve_sources("XX", None), "registry: unknown country rejected"),
     (lambda: resolve_sources("CA", ["zillow"]), "registry: nothing usable rejected"),
 ]:
@@ -199,6 +200,48 @@ or_studio2 = openrent._listing_from_record(
     city="London", nation="ENG")
 check("openrent studio from title only", or_studio2.bedrooms, 0.5)
 check("openrent country+currency", (ol.country, ol.currency), ("GB", "GBP"))
+
+# --- zumper parse ------------------------------------------------------------
+zp_state = {
+    "currentSearch": {
+        "listables": {
+            "-1": [{
+                "listing_id": 62671178, "building_id": 1835640,
+                "building_name": "Highline Apartments", "title": "A1",
+                "address": "13201 Legendary Dr", "city": "Austin", "state": "TX",
+                "zipcode": "78727", "lat": 30.437264, "lng": -97.73076,
+                "min_price": 1274, "max_price": 2576,
+                "min_bedrooms": 1, "max_bedrooms": 3,
+                "min_bathrooms": 1, "min_square_feet": 668,
+                "property_type": 4, "pets": [1, 2],
+                "date_available": "2026-08-01",
+                "short_description": "Modern units near the domain",
+                "url": "/apartment-buildings/p109486/highline-luxury-apartments-austin-tx",
+            }],
+            "-2": 7,
+        }
+    }
+}
+zp_html = f"<script>window.__PRELOADED_STATE__ = {json.dumps(zp_state)}; window.__GIT_SHA__ = 'x';</script>"
+zp_recs = zumper._records_from_page(zp_html)
+check("zumper state decode (trailing JS ok)", len(zp_recs), 1)
+zl = zumper._listing_from_record(zp_recs[0], city="Austin", state="TX")
+check("zumper rent = min_price", zl.monthly_rent, 1274)
+check("zumper beds", zl.bedrooms, 1.0)
+check("zumper sqft", zl.sqft, 668)
+check("zumper zip", zl.postal_code, "78727")
+check("zumper state code", zl.province, "TX")
+check("zumper country+currency", (zl.country, zl.currency), ("US", "USD"))
+check("zumper type 4 -> apartment", zl.property_type, "apartment")
+check("zumper title = building — plan", zl.title, "Highline Apartments — A1")
+check("zumper pets", zl.pet_friendly, True)
+check("zumper available ISO", zl.available_from, date(2026, 8, 1))
+check("zumper url absolutized", zl.url.startswith("https://www.zumper.com/"), True)
+zl2 = zumper._listing_from_record(
+    {**zp_recs[0], "min_bedrooms": 0, "pets": [], "property_type": 99}, city="Austin", state="TX")
+check("zumper studio 0 -> 0.5", zl2.bedrooms, 0.5)
+check("zumper empty pets -> unknown", zl2.pet_friendly, None)
+check("zumper unknown type -> None", zl2.property_type, None)
 
 # --- cross-source dedup ------------------------------------------------------
 deduped, merged = dedupe([k, rf])

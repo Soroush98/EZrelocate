@@ -6,11 +6,11 @@
     "country": {
       "title": "Country",
       "type": "string",
-      "description": "Which country's rental market to scrape. Sources are per-country: Canada = Kijiji + RentFaster, UK = OpenRent. US/Australia are on the roadmap. Match the proxy country below to this.",
+      "description": "Which country's rental market to scrape. Sources are per-country: Canada = Kijiji + RentFaster, UK = OpenRent, US = Zumper. Australia is on the roadmap. Match the proxy country below to this.",
       "editor": "select",
       "default": "CA",
-      "enum": ["CA", "GB"],
-      "enumTitles": ["Canada", "United Kingdom"]
+      "enum": ["CA", "GB", "US"],
+      "enumTitles": ["Canada", "United Kingdom", "United States"]
     },
     "sources": {
       "title": "Sources",
@@ -21,8 +21,8 @@
       "prefill": [],
       "items": {
         "type": "string",
-        "enum": ["kijiji", "rentfaster", "openrent"],
-        "enumTitles": ["Kijiji (CA)", "RentFaster.ca (CA)", "OpenRent (UK)"]
+        "enum": ["kijiji", "rentfaster", "openrent", "zumper"],
+        "enumTitles": ["Kijiji (CA)", "RentFaster.ca (CA)", "OpenRent (UK)", "Zumper (US)"]
       }
     },
     "cities": {

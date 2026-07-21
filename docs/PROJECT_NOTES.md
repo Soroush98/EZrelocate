@@ -44,7 +44,7 @@ One concept, edited in more than one place. If you touch one, touch the others:
 | Gumtree AU | AU | 403 on first impersonated request | Ruled out (needs headless) |
 | Flatmates.com.au | AU | 429 on first request (REA-owned) | Ruled out (needs headless) |
 | rent.com.au | AU | 403 (challenge page, ~150 KB shell) | Ruled out (needs headless) |
-| Zumper | US | 200; `window.__PRELOADED_STATE__` embeds structured listables (address, city, state, lat/lng, amenity tags, urls) | **Viable — phase-3 front-runner**, see 2026-07-21 note |
+| Zumper | US | 200; `window.__PRELOADED_STATE__` embeds structured listables (address, city, state, lat/lng, amenity tags, urls); paginate with `?page=N` | **In use** (src/sources/zumper.py) — see 2026-07-21 note |
 | HotPads | US | 200; `__PRELOADED_STATE__` present (Zillow-owned — higher ToS/likely-hardening risk) | Viable-looking, second choice |
 | Craigslist | US | 200 but static rows carry only title/price/city — no coords/beds; bans hard; saturated on Apify | Weak candidate |
 
@@ -62,6 +62,23 @@ One concept, edited in more than one place. If you touch one, touch the others:
   `id` repeats across a building's unit types — disambiguate with the link's trailing
   `_<n>` suffix.
 - Why record: saves re-discovering the Cloudflare 403 and the exact unblock headers.
+
+### 2026-07-21 — US launch: Zumper implementation notes
+- Pagination is just `?page=N` on the search URL (each page server-renders a
+  fresh `__PRELOADED_STATE__`, ~25-32 records); no XHR API needed. Stop when a
+  page adds nothing new — featured records repeat across pages, so dedupe by
+  `listing_id` per city.
+- `currentSearch.listables` values are HETEROGENEOUS (lists of records mixed
+  with ints/bools/None) — type-check while flattening.
+- Records are per-FLOORPLAN within a building feed: `title` is a floorplan
+  label ("A1"), `building_name` is the human name; compose "Building — Plan".
+  `min_price` is the advertised "from" price; `min_bedrooms` 0 = studio.
+- `property_type` is a numeric enum, only partially mapped (1/4 apartment,
+  2 house, 16 room — sampled empirically); unknown values → None, don't guess.
+- Plain httpx gets a ~3 KB JS shell (200, not 403!) — a "success" that isn't;
+  check content, not just status. Chrome TLS impersonation returns the real
+  page from a home IP. Apify datacenter behavior untested.
+- `pets: []` means unknown, not "no pets" — only non-empty lists assert.
 
 ### 2026-07-21 — US/AU probe round: US open (Zumper), Australia blocked wall-to-wall
 - One impersonated (curl_cffi Chrome) request per site, home IP:

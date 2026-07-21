@@ -1,9 +1,9 @@
-# Rental Listings Scraper — Canada 🇨🇦 + UK 🇬🇧 + Geo Data 🏠
+# Rental Listings Scraper — Canada 🇨🇦 + UK 🇬🇧 + US 🇺🇸 + Geo Data 🏠
 
 One **normalized, deduplicated** feed of rental listings — **Kijiji** and
-**RentFaster.ca** for Canada, **OpenRent** for the UK — with optional
-**nearest-amenity distances** (transit, grocery, school, …) attached to every
-listing.
+**RentFaster.ca** for Canada, **OpenRent** for the UK, **Zumper** for the US —
+with optional **nearest-amenity distances** (transit, grocery, school, …)
+attached to every listing.
 
 Most rental scrapers give you one site in that site's own ad-hoc shape. This
 Actor gives you **every source in a single schema across countries**, collapses
@@ -14,7 +14,7 @@ each place is from the subway* — a signal no other rental scraper on Apify shi
 
 | | Typical single-site scraper | This Actor |
 |---|---|---|
-| Sources | One | Kijiji + RentFaster (CA), OpenRent (UK), more coming |
+| Sources | One | Kijiji + RentFaster (CA), OpenRent (UK), Zumper (US) |
 | Schema | Per-site, ad-hoc | One unified schema across sources & countries |
 | Duplicates | You dedupe yourself | Cross-source dedup built in (`also_on`) |
 | Location intelligence | Lat/lng only | Nearest-amenity distances, **included free** |
@@ -25,9 +25,9 @@ each place is from the subway* — a signal no other rental scraper on Apify shi
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `country` | string | `"CA"` | `CA` (Kijiji + RentFaster) or `GB` (OpenRent). US/AU on the roadmap |
+| `country` | string | `"CA"` | `CA` (Kijiji + RentFaster), `GB` (OpenRent), or `US` (Zumper) |
 | `sources` | array | all for the country | Sites to scrape; other countries' sources are ignored |
-| `cities` | array | `[]` (all) | City names, e.g. `["Toronto","Calgary"]` or `["London","Manchester"]` |
+| `cities` | array | `[]` (all) | City names, e.g. `["Toronto","Calgary"]`, `["London"]`, `["Austin","Seattle"]` |
 | `maxPerCity` | int | `100` | Cap per city, per source |
 | `dedupe` | bool | `true` | Merge cross-source duplicates |
 
@@ -123,6 +123,11 @@ normalized for you.
 UK listings don't publish full postcodes before enquiry), and `description` is
 the search snippet, not the full ad text.
 
+**US specifics** (`country: "US"`, Zumper): `province` holds the state code,
+apartment complexes yield one row per advertised floorplan (same address,
+distinct `source_id`), `monthly_rent` is that floorplan's "from" price, and
+`description` is a short summary.
+
 ## Use it from Claude (MCP) 🤖
 
 This Actor is built to be driven by an AI agent, not just a form. Connect
@@ -145,15 +150,16 @@ short, correct set back. The `amenity_distances_m` field is what lets it answer
 
 ## Proxy — please read
 
-- **RentFaster.ca** and **OpenRent** sit behind Cloudflare challenges that
-  fingerprint the TLS handshake, so browser-like *headers* alone get `403`. The
-  Actor forges a real Chrome TLS/HTTP2 fingerprint (via `curl_cffi`) on a sticky
-  IP to clear them; a **residential proxy** is still recommended for a clean IP.
+- **RentFaster.ca**, **OpenRent**, and **Zumper** sit behind bot challenges that
+  fingerprint the TLS handshake, so browser-like *headers* alone get blocked.
+  The Actor forges a real Chrome TLS/HTTP2 fingerprint (via `curl_cffi`) on a
+  sticky IP to clear them; a **residential proxy** is still recommended for a
+  clean IP.
 - **Kijiji** rate-limits and blocks datacenter IPs aggressively.
 
 Use **Apify Proxy** (residential group) for production runs, and set
-`apifyProxyCountry` to match your `country` input (`CA` or `GB`). The default
-input already enables Apify Proxy.
+`apifyProxyCountry` to match your `country` input (`CA`, `GB`, or `US`). The
+default input already enables Apify Proxy.
 
 ## Amenity enrichment
 
@@ -174,10 +180,11 @@ ways those terms prohibit. This Actor is provided for research and personal use.
 
 ## Roadmap
 
-- **US / Australia sources.** The pipeline is already country-aware — what
-  remains is a viable scraper per market (Australia's two big portals currently
-  hard-block automation; the US is the most saturated/anti-bot market).
-- More UK sources for cross-source dedup (OpenRent is single-source today).
+- **Australia.** Every major AU portal (Domain, realestate.com.au, Gumtree AU,
+  Flatmates, rent.com.au) hard-blocks automation today; support waits on a
+  headless-browser approach being worth it.
+- More UK/US sources for cross-source dedup (OpenRent and Zumper are
+  single-source per country today).
 - Facebook Marketplace + rentals.ca sources (best-effort; both are anti-bot).
 - Listing-level change tracking (price drops, relistings).
 

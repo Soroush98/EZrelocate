@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import NamedTuple
 
 from ..models import Listing
-from . import kijiji, openrent, rentfaster
+from . import kijiji, openrent, rentfaster, zumper
 
 # ISO 3166-1 alpha-2 -> display name. The pipeline is written against these;
 # only countries that also have sources below are exposed in the input schema.
@@ -41,6 +41,7 @@ REGISTRY: dict[str, Source] = {
     "kijiji": Source(kijiji.scrape, "CA"),
     "rentfaster": Source(rentfaster.scrape, "CA", sticky_tls=True),
     "openrent": Source(openrent.scrape, "GB", sticky_tls=True),
+    "zumper": Source(zumper.scrape, "US", sticky_tls=True),
 }
 
 
