@@ -132,8 +132,18 @@ def _stanza_matches(stanza: str, tags: dict[str, str]) -> bool:
     return True
 
 
-class _POIHandler(osmium.SimpleHandler):
-    """Collect classified POI coordinates from nodes and ways.
+def _extract_file(
+    pbf: Path, coords: dict[str, list[tuple[float, float]]], seen: set
+) -> None:
+    """Stream one .pbf, appending classified POI coordinates.
+
+    Uses FileProcessor + EmptyTagFilter so untagged entities (the vast majority
+    of nodes — pure way geometry) are dropped in C++ and never cross into
+    Python. This is the difference between minutes and hours on a country-scale
+    file: a SimpleHandler's node() callback fires ~350M times for the UK; the
+    filtered iterator fires only for the few million tagged entities. The
+    location cache still indexes every node (it runs ahead of the filters), so
+    way centroids resolve normally.
 
     Ways (parks, schools, hospitals mapped as polygons) get a centroid averaged
     from their node coordinates — exact enough for amenity-proximity scoring.
@@ -141,33 +151,34 @@ class _POIHandler(osmium.SimpleHandler):
     closed ways. `seen` is shared across extracts so border overlaps between
     adjacent Geofabrik files don't double-count an element.
     """
-
-    def __init__(self, coords: dict[str, list[tuple[float, float]]], seen: set) -> None:
-        super().__init__()
-        self.coords = coords
-        self.seen = seen
-
-    def node(self, n) -> None:
-        if n.location.valid():
-            self._consider(n.tags, ("n", n.id), n.location.lat, n.location.lon)
-
-    def way(self, w) -> None:
-        try:
-            pts = [(nd.lat, nd.lon) for nd in w.nodes if nd.location.valid()]
-        except osmium.InvalidLocationError:
-            pts = []
-        if not pts:
-            return
-        lat = sum(p[0] for p in pts) / len(pts)
-        lon = sum(p[1] for p in pts) / len(pts)
-        self._consider(w.tags, ("w", w.id), lat, lon)
-
-    def _consider(self, tags, key: tuple, lat: float, lon: float) -> None:
-        td = {t.k: t.v for t in tags}
-        poi_type = classify(td)
-        if poi_type and key not in self.seen:
-            self.seen.add(key)
-            self.coords[poi_type].append((lat, lon))
+    with tempfile.NamedTemporaryFile(suffix=".idx") as idx_file:
+        fp = (
+            osmium.FileProcessor(str(pbf), osmium.osm.NODE | osmium.osm.WAY)
+            .with_locations(f"{_INDEX_TYPE},{idx_file.name}")
+            .with_filter(osmium.filter.EmptyTagFilter())
+        )
+        for obj in fp:
+            if obj.is_node():
+                if not obj.location.valid():
+                    continue
+                key = ("n", obj.id)
+                lat, lon = obj.location.lat, obj.location.lon
+            else:
+                try:
+                    pts = [(nd.lat, nd.lon) for nd in obj.nodes if nd.location.valid()]
+                except osmium.InvalidLocationError:
+                    pts = []
+                if not pts:
+                    continue
+                key = ("w", obj.id)
+                lat = sum(p[0] for p in pts) / len(pts)
+                lon = sum(p[1] for p in pts) / len(pts)
+            if key in seen:
+                continue
+            poi_type = classify({t.k: t.v for t in obj.tags})
+            if poi_type:
+                seen.add(key)
+                coords[poi_type].append((lat, lon))
 
 
 def _download(path: str, dest_dir: Path) -> Path:
@@ -190,13 +201,9 @@ def build(country: str, pbfs: list[Path], out_npz: Path) -> None:
     coords: dict[str, list[tuple[float, float]]] = {c: [] for c, _ in CATEGORIES}
     seen: set = set()
     for pbf in pbfs:
-        print(f"  extracting {pbf.name} ...")
-        handler = _POIHandler(coords, seen)
-        with tempfile.NamedTemporaryFile(suffix=".idx") as idx_file:
-            handler.apply_file(
-                str(pbf), locations=True, idx=f"{_INDEX_TYPE},{idx_file.name}"
-            )
-        print(f"    running total: {sum(len(v) for v in coords.values())} POIs")
+        print(f"  extracting {pbf.name} ...", flush=True)
+        _extract_file(pbf, coords, seen)
+        print(f"    running total: {sum(len(v) for v in coords.values())} POIs", flush=True)
 
     arrays = {
         cat: np.asarray(pts, dtype=np.float32).reshape(-1, 2)

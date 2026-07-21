@@ -57,6 +57,20 @@ One concept, edited in more than one place. If you touch one, touch the others:
   `_<n>` suffix.
 - Why record: saves re-discovering the Cloudflare 403 and the exact unblock headers.
 
+### 2026-07-21 — pyosmium trap: SimpleHandler callbacks fire per NODE, not per POI
+- The first GB index build ran 2h40m without finishing: `SimpleHandler.node()`
+  is invoked from C++ into Python for EVERY node in the file — the UK extract
+  has ~350M, nearly all untagged way-geometry — so the build was ~99% Python
+  call overhead. Canada never exposed this only because it ships as 13 smaller
+  province files.
+- Fix: `osmium.FileProcessor(...).with_locations(...).with_filter(
+  osmium.filter.EmptyTagFilter())` (pyosmium ≥ 4) — untagged entities are
+  dropped in C++ before crossing into Python, while the location cache still
+  indexes every node so way centroids resolve. PEI verification: byte-identical
+  npz, ~5x faster even on that small file; country-scale files go from hours to
+  minutes. Any future pyosmium work should start from FileProcessor + filters,
+  never a bare SimpleHandler.
+
 ### 2026-07-21 — UK launch: OpenRent viable (and pleasant), Domain.com.au is not
 - **OpenRent two-stage JSON pipeline** (no HTML card parsing needed):
   1. `GET /properties-to-rent/{city-slug}` embeds the ENTIRE result set as
