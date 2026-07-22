@@ -1,0 +1,44 @@
+{
+  "source": "Geofabrik US extracts (51 file(s))",
+  "categories": [
+    "subway",
+    "train",
+    "bus_stop",
+    "grocery",
+    "cafe",
+    "pharmacy",
+    "park",
+    "school",
+    "university",
+    "library",
+    "gym",
+    "hospital"
+  ],
+  "counts": {
+    "subway": 4746,
+    "train": 2757,
+    "bus_stop": 333179,
+    "grocery": 123800,
+    "cafe": 52431,
+    "pharmacy": 20237,
+    "park": 348513,
+    "school": 153150,
+    "university": 7612,
+    "library": 19081,
+    "gym": 47776,
+    "hospital": 30997
+  },
+  "total": 1144279,
+  "bbox": {
+    "lat": [
+      19.046077728271484,
+      71.32495880126953
+    ],
+    "lng": [
+      -177.37567138671875,
+      -66.95160675048828
+    ]
+  },
+  "dtype": "float32",
+  "note": "Regenerate with tools/build_poi_index.py then `apify push`."
+}

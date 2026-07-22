@@ -164,8 +164,8 @@ default input already enables Apify Proxy.
 ## Amenity enrichment
 
 Nearest-amenity distances come from **bundled offline POI indexes** — ~225k
-Canadian and ~529k UK POIs (OpenStreetMap, via Geofabrik) shipped inside the
-Actor and queried in-process. No external API, no rate limits: enriching
+Canadian, ~529k UK, and ~1.14M US POIs (OpenStreetMap, via Geofabrik) shipped
+inside the Actor and queried in-process. No external API, no rate limits: enriching
 hundreds of listings takes well under a second, and it's **included free** (no
 per-listing enrichment charge). The snapshots are refreshed periodically; POIs
 are static infrastructure so they don't need to be live.
