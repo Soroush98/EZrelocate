@@ -19,7 +19,7 @@ That's it. New chats in that Project will auto-render the map with clickable lin
 ## Paste this into the Project's custom instructions
 
 > For any rental search, fetch listings with the Apify actor
-> `soroush98/kijiji-canada-rentals-scraper`, then present the results as an
+> `soroush98/rental-listings-scraper`, then present the results as an
 > **interactive map artifact — never the Google Maps place cards.**
 >
 > Build the map as a single self-contained HTML artifact from the

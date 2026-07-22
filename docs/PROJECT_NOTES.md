@@ -101,6 +101,20 @@ One concept, edited in more than one place. If you touch one, touch the others:
   Geofabrik downloads (51 files) — the parse is fast now, the download is the
   long pole; cache it.
 
+### 2026-07-22 — Renamed to `rental-listings-scraper` (store positioning)
+- Store survey: every competitor is single-site (`zumper-rental-scraper`,
+  `openrent-property-scraper`, `zillow-rentals-scraper`…) and NOBODY owns the
+  generic head terms — "rental listings" / "apartment scraper" return only
+  site-specific actors. Multi-site/multi-country is our differentiator, so the
+  generic slug is the play, esp. for MCP-driven discovery where Claude
+  searches with the user's plain words ("find apartments for rent in …").
+- Platform limits (learned the 400 way): actor title ≤ 63 chars, description
+  ≤ 300 chars. Renaming safely = PUT the platform rename FIRST, then update
+  `.actor/actor.json` — pushing a changed name creates a NEW actor instead.
+- Old URL apify.com/soroush98/kijiji-canada-rentals-scraper is dead after the
+  rename (actor ID Yy3if5Rg6khgygVAa is unchanged; by-ID references and run
+  history survive).
+
 ### 2026-07-21 — SDK upgraded to apify 4.0.0: pins dropped, _compat.py deleted
 - `apify==4.0.0` + `crawlee==1.8.3` (pinned as the verified pair) replace the
   2.7.3-era set; the `pydantic<2.12` and `browserforge==1.2.3` pins are gone

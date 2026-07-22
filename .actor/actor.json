@@ -1,8 +1,8 @@
 {
   "actorSpecification": 1,
-  "name": "kijiji-canada-rentals-scraper",
-  "title": "Rental Listings Scraper — Canada + UK + US (Kijiji, RentFaster, OpenRent, Zumper) + Geo Data",
-  "description": "Scrape rental listings from Kijiji + RentFaster.ca (Canada), OpenRent (UK), and Zumper (US) in one normalized schema — price, beds, baths, coordinates, currency — with cross-source dedup and nearest-amenity (subway/grocery/school) distances. Apartments, flats, houses, rooms.",
+  "name": "rental-listings-scraper",
+  "title": "🏠 Rental Listings Scraper — Canada, UK & USA | Geo Enriched",
+  "description": "Apartments, houses, flats & rooms for rent from Kijiji + RentFaster (Canada), OpenRent (UK) and Zumper (USA) in one normalized schema: price, beds, coordinates, currency. Filters: max rent, bedrooms, keywords, near an address or subway/grocery/school. Cross-source dedup + map. Agent/MCP-ready.",
   "version": "0.1",
   "meta": {
     "templateId": "python-start"
