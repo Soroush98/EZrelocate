@@ -122,7 +122,9 @@ async def main() -> None:
             f"nearAmenities={near_amenities}@{max_amenity_m}m, "
             f"nearAddress={near_address!r}@{near_address_radius}m) "
             f"dedupe={do_dedupe} "
-            f"proxy={'on (kijiji rotates, rentfaster sticky+chrome-TLS)' if proxy_cfg else 'off'}"
+            f"proxy={'on' if proxy_cfg else 'off'} "
+            f"(sticky+chrome-TLS: {[s for s in sources if REGISTRY[s].sticky_tls]}, "
+            f"rotating: {[s for s in sources if not REGISTRY[s].sticky_tls]})"
         )
 
         # 1. Scrape ------------------------------------------------------------
