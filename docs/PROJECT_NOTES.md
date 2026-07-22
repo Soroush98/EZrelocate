@@ -101,6 +101,24 @@ One concept, edited in more than one place. If you touch one, touch the others:
   Geofabrik downloads (51 files) — the parse is fast now, the download is the
   long pole; cache it.
 
+### 2026-07-21 — SDK upgraded to apify 4.0.0: pins dropped, _compat.py deleted
+- `apify==4.0.0` + `crawlee==1.8.3` (pinned as the verified pair) replace the
+  2.7.3-era set; the `pydantic<2.12` and `browserforge==1.2.3` pins are gone
+  (browserforge is no longer even a transitive dep).
+- **`src/_compat.py` (MCP-origin enum shim) deleted**: apify 4.0 no longer
+  validates `meta.origin` against a strict enum anywhere (no `MetaOrigin` /
+  `ActorRun` TypeAdapter in the package), so unknown origins can't crash
+  `Actor.init()`. Note `MetaOrigin` itself STILL lacks 'MCP' — irrelevant now,
+  but don't reintroduce strict validation against it.
+- API surface we use survived 2.7.3 → 4.0.0 unchanged (all still async;
+  `Actor.charge`'s `count` became keyword-only — we already pass it by
+  keyword). Verified live: openrent + rentfaster still clear Cloudflare with
+  curl_cffi 0.15; full smoke suite green; cloud run on the platform.
+- Local `python -m src` now fails at `create_proxy_configuration` with
+  "Proxy external access isn't enabled" — an ACCOUNT limitation of running
+  Apify Proxy from outside the platform, not an SDK bug. Local e2e = the
+  harnesses (SDK stubbed); platform e2e = a cloud run.
+
 ### 2026-07-21 — pyosmium trap: SimpleHandler callbacks fire per NODE, not per POI
 - The first GB index build ran 2h40m without finishing: `SimpleHandler.node()`
   is invoked from C++ into Python for EVERY node in the file — the UK extract
@@ -186,6 +204,6 @@ One concept, edited in more than one place. If you touch one, touch the others:
   blow up in `Actor.init()`, BEFORE any of our code. CLI/API/WEB origins worked, so it
   only bit the MCP path (the one we built toward). Band-aid: `src/_compat.py` injects
   the `MCP` member into the enum *before* `import apify` (the run_validator TypeAdapter
-  bakes the value set at build time). **Durable fix: upgrade to apify 3.x** — which
-  also drops the `pydantic<2.12` / `browserforge==1.2.3` pins. Two SDK-pin bites now;
-  upgrading is overdue.
+  bakes the value set at build time). **Resolved 2026-07-21: upgraded to apify 4.0.0**,
+  which drops the strict validation and the pydantic/browserforge pins — see the
+  2026-07-21 SDK-upgrade entry.
