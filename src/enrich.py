@@ -78,7 +78,10 @@ def _nearest_by_category(
             if _matches(tags, filters):
                 d = _haversine_m(lat, lng, elat, elng)
                 if cat not in best or d < best[cat]["m"]:
-                    best[cat] = {"m": round(d), "lat": round(elat, 6), "lng": round(elng, 6)}
+                    nm = (tags.get("name") or tags.get("name:en") or "").strip()
+                    best[cat] = {
+                        "m": round(d), "lat": round(elat, 6), "lng": round(elng, 6),
+                    } | ({"name": nm} if nm else {})
     return best
 
 
@@ -137,6 +140,7 @@ def _enrich_local(targets: list[Listing], index, radius_m: int) -> int:
             m.amenity_distances_m = {cat: v["m"] for cat, v in near.items()}
             m.nearby_amenities = [
                 {"t": cat, "lat": v["lat"], "lng": v["lng"], "m": v["m"]}
+                | ({"name": v["name"]} if "name" in v else {})
                 for cat, v in near.items()
             ]
     return len(targets)
@@ -160,6 +164,7 @@ async def _enrich_overpass(targets: list[Listing], radius_m: int, log) -> int:
                     m.amenity_distances_m = {cat: v["m"] for cat, v in near.items()}
                     m.nearby_amenities = [
                         {"t": cat, "lat": v["lat"], "lng": v["lng"], "m": v["m"]}
+                        | ({"name": v["name"]} if "name" in v else {})
                         for cat, v in near.items()
                     ]
                 done += 1

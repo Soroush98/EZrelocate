@@ -6,9 +6,14 @@ Run from the repo root:
 
 import json
 import sys
+import tempfile
 from datetime import date
+from pathlib import Path
+
+import numpy as np
 
 from src import normalize as N
+from src.amenities_local import PoiIndex
 from src.dedup import dedupe
 from src.filters import passes_amenities, passes_basic, within_point
 from src.models import Listing
@@ -242,6 +247,20 @@ zl2 = zumper._listing_from_record(
 check("zumper studio 0 -> 0.5", zl2.bedrooms, 0.5)
 check("zumper empty pets -> unknown", zl2.pet_friendly, None)
 check("zumper unknown type -> None", zl2.property_type, None)
+
+# --- named POI index ---------------------------------------------------------
+with tempfile.TemporaryDirectory() as _tmp:
+    _npz = Path(_tmp) / "pois_test.npz"
+    np.savez_compressed(
+        _npz,
+        cafe=np.array([[43.6500, -79.3800]], dtype=np.float32),
+        cafe__names=np.array(["Sam's Cafe".encode()], dtype="S48"),
+        bus_stop=np.array([[43.6501, -79.3801]], dtype=np.float32),  # unnamed category
+    )
+    _idx = PoiIndex(_npz)
+    _hit = _idx.nearest_batch(np.array([43.6500]), np.array([-79.3800]), radius_m=500)[0]
+    check("poi index: named category carries name", _hit["cafe"].get("name"), "Sam's Cafe")
+    check("poi index: unnamed category has no name key", "name" in _hit["bus_stop"], False)
 
 # --- cross-source dedup ------------------------------------------------------
 deduped, merged = dedupe([k, rf])

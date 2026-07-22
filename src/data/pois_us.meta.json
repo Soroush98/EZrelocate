@@ -14,6 +14,18 @@
     "gym",
     "hospital"
   ],
+  "named_categories": [
+    "cafe",
+    "grocery",
+    "gym",
+    "hospital",
+    "library",
+    "pharmacy",
+    "school",
+    "subway",
+    "train",
+    "university"
+  ],
   "counts": {
     "subway": 4746,
     "train": 2757,

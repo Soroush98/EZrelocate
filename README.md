@@ -167,8 +167,11 @@ Nearest-amenity distances come from **bundled offline POI indexes** — ~225k
 Canadian, ~529k UK, and ~1.14M US POIs (OpenStreetMap, via Geofabrik) shipped
 inside the Actor and queried in-process. No external API, no rate limits: enriching
 hundreds of listings takes well under a second, and it's **included free** (no
-per-listing enrichment charge). The snapshots are refreshed periodically; POIs
-are static infrastructure so they don't need to be live.
+per-listing enrichment charge). Stations, groceries, cafes, pharmacies, schools,
+universities, libraries, gyms and hospitals carry their **OSM name** too — the
+map labels them "Charing Cross — subway · 240m", not just a dot. The snapshots
+are refreshed periodically; POIs are static infrastructure so they don't need
+to be live.
 
 ## Legal & fair use
 

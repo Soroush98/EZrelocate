@@ -104,6 +104,16 @@ EXTRACTS: dict[str, list[str]] = {
 # resolve way geometries.
 _INDEX_TYPE = "sparse_file_array"
 
+# Categories whose POIs get their OSM name bundled (stored as a parallel
+# `<cat>__names` array, UTF-8 truncated to _NAME_BYTES). bus_stop and park are
+# deliberately excluded: together they are ~1M of the ~1.9M POIs and their
+# identity rarely matters, so skipping them keeps the size cost of names small.
+NAMED_CATEGORIES = frozenset({
+    "subway", "train", "grocery", "cafe", "pharmacy",
+    "school", "university", "library", "gym", "hospital",
+})
+_NAME_BYTES = 48
+
 
 def classify(tags: dict[str, str]) -> str | None:
     for poi_type, stanzas in CATEGORIES:
@@ -133,7 +143,10 @@ def _stanza_matches(stanza: str, tags: dict[str, str]) -> bool:
 
 
 def _extract_file(
-    pbf: Path, coords: dict[str, list[tuple[float, float]]], seen: set
+    pbf: Path,
+    coords: dict[str, list[tuple[float, float]]],
+    names: dict[str, list[bytes]],
+    seen: set,
 ) -> None:
     """Stream one .pbf, appending classified POI coordinates.
 
@@ -175,10 +188,16 @@ def _extract_file(
                 lon = sum(p[1] for p in pts) / len(pts)
             if key in seen:
                 continue
-            poi_type = classify({t.k: t.v for t in obj.tags})
+            tags = {t.k: t.v for t in obj.tags}
+            poi_type = classify(tags)
             if poi_type:
                 seen.add(key)
                 coords[poi_type].append((lat, lon))
+                if poi_type in NAMED_CATEGORIES:
+                    nm = (tags.get("name") or tags.get("name:en") or "").strip()
+                    # Byte-truncate; a codepoint cut at the boundary is dropped
+                    # by the reader's errors="ignore" decode.
+                    names[poi_type].append(nm.encode("utf-8")[:_NAME_BYTES])
 
 
 def _download(path: str, dest_dir: Path) -> Path:
@@ -199,10 +218,11 @@ def _download(path: str, dest_dir: Path) -> Path:
 
 def build(country: str, pbfs: list[Path], out_npz: Path) -> None:
     coords: dict[str, list[tuple[float, float]]] = {c: [] for c, _ in CATEGORIES}
+    names: dict[str, list[bytes]] = {c: [] for c, _ in CATEGORIES if c in NAMED_CATEGORIES}
     seen: set = set()
     for pbf in pbfs:
         print(f"  extracting {pbf.name} ...", flush=True)
-        _extract_file(pbf, coords, seen)
+        _extract_file(pbf, coords, names, seen)
         print(f"    running total: {sum(len(v) for v in coords.values())} POIs", flush=True)
 
     arrays = {
@@ -212,13 +232,18 @@ def build(country: str, pbfs: list[Path], out_npz: Path) -> None:
     total = int(sum(len(a) for a in arrays.values()))
     if not total:
         sys.exit("no POIs extracted — wrong extract, or a broken .pbf?")
+    name_arrays = {
+        f"{cat}__names": np.asarray(vals, dtype=f"S{_NAME_BYTES}")
+        for cat, vals in names.items()
+    }
 
     out_npz.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out_npz, **arrays)
+    np.savez_compressed(out_npz, **arrays, **name_arrays)
     stacked = np.vstack([a for a in arrays.values() if len(a)])
     meta = {
         "source": f"Geofabrik {country} extracts ({len(pbfs)} file(s))",
         "categories": [c for c, _ in CATEGORIES],
+        "named_categories": sorted(NAMED_CATEGORIES),
         "counts": {cat: int(len(a)) for cat, a in arrays.items()},
         "total": total,
         "bbox": {

@@ -45,7 +45,8 @@ class Listing:
     # Enrichment (optional, populated only when --enrichAmenities is on)
     amenity_distances_m: dict[str, int] | None = None
     # The located nearest amenity per type — same data as amenity_distances_m but
-    # with coordinates, so a map can plot each POI. List of {t, lat, lng, m}.
+    # with coordinates (and the POI's OSM name where the bundled index carries
+    # one), so a map can plot and label each POI. List of {t, lat, lng, m, name?}.
     nearby_amenities: list[dict] | None = None
 
     # Cross-source dedup metadata (populated by dedup.py)

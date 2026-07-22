@@ -1,5 +1,5 @@
 {
-  "source": "EZrelocate pois table (Geofabrik-derived)",
+  "source": "Geofabrik CA extracts (13 file(s))",
   "categories": [
     "subway",
     "train",
@@ -14,28 +14,40 @@
     "gym",
     "hospital"
   ],
+  "named_categories": [
+    "cafe",
+    "grocery",
+    "gym",
+    "hospital",
+    "library",
+    "pharmacy",
+    "school",
+    "subway",
+    "train",
+    "university"
+  ],
   "counts": {
-    "subway": 964,
-    "train": 356,
-    "bus_stop": 101195,
-    "grocery": 14545,
-    "cafe": 10677,
-    "pharmacy": 5179,
-    "park": 64639,
-    "school": 14536,
-    "university": 921,
-    "library": 1683,
-    "gym": 6819,
-    "hospital": 3643
+    "subway": 967,
+    "train": 673,
+    "bus_stop": 108238,
+    "grocery": 18156,
+    "cafe": 12514,
+    "pharmacy": 6226,
+    "park": 77603,
+    "school": 18519,
+    "university": 1059,
+    "library": 2275,
+    "gym": 9121,
+    "hospital": 4535
   },
-  "total": 225157,
+  "total": 259886,
   "bbox": {
     "lat": [
-      42.20908737182617,
-      59.99802017211914
+      41.7637939453125,
+      79.4339599609375
     ],
     "lng": [
-      -136.0242156982422,
+      -141.0609893798828,
       -52.62358474731445
     ]
   },

@@ -51,10 +51,15 @@ class PoiIndex:
 
     def __init__(self, path: Path) -> None:
         with np.load(path) as data:
-            # cat -> (latlng [N,2] float32, xyz [N,3] float32)
+            # cat -> (latlng [N,2] float32, xyz [N,3] float64)
             self._cats: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+            # cat -> POI names ([N] bytes, UTF-8, may be absent per category)
+            self._names: dict[str, np.ndarray] = {}
             self.total = 0
             for cat in data.files:
+                if cat.endswith("__names"):
+                    self._names[cat.removesuffix("__names")] = data[cat]
+                    continue
                 latlng = data[cat]
                 self._cats[cat] = (latlng, _to_unit_xyz(latlng))
                 self.total += len(latlng)
@@ -68,7 +73,9 @@ class PoiIndex:
         categories: list[str] | None = None,
     ) -> list[dict[str, dict]]:
         """For each (lat,lng), the nearest POI per category within radius_m, located.
-        Returns one dict per input listing: {category: {"m": dist, "lat": .., "lng": ..}}."""
+        Returns one dict per input listing:
+        {category: {"m": dist, "lat": .., "lng": .., "name": ..?}} — "name" only for
+        categories the index bundles names for, and only when the POI has one."""
         lats = np.asarray(lats, dtype=np.float64)
         lngs = np.asarray(lngs, dtype=np.float64)
         m = len(lats)
@@ -92,12 +99,18 @@ class PoiIndex:
                 idx = np.argmax(dots, axis=0)  # [c]
                 nlat, nlng = latlng[idx, 0].astype(np.float64), latlng[idx, 1].astype(np.float64)
                 dist = _haversine_m(lats[s:e], lngs[s:e], nlat, nlng)
+                names = self._names.get(cat)
                 for k in np.nonzero(dist <= radius_m)[0]:
-                    out[s + int(k)][cat] = {
+                    entry = {
                         "m": int(round(float(dist[k]))),
                         "lat": round(float(nlat[k]), 6),
                         "lng": round(float(nlng[k]), 6),
                     }
+                    if names is not None:
+                        nm = bytes(names[int(idx[k])]).decode("utf-8", "ignore").strip()
+                        if nm:
+                            entry["name"] = nm
+                    out[s + int(k)][cat] = entry
         return out
 
 

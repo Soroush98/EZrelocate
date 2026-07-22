@@ -143,7 +143,8 @@ let DATA = [];
 function clearAmenities() { amenityLayer.clearLayers(); }
 
 // Plot one listing's nearest amenities as colored dots, with a faint line back to
-// the listing and a "type · 120m" tooltip. Called when its popup opens.
+// the listing and a "Name — type · 120m" tooltip (name when the index has one).
+// Called when its popup opens.
 function showAmenities(it) {
   clearAmenities();
   const home = [Number(it.lat), Number(it.lng)];
@@ -151,9 +152,10 @@ function showAmenities(it) {
     const lat = Number(a.lat), lng = Number(a.lng);
     if (!isFinite(lat) || !isFinite(lng)) continue;
     const color = AMENITY_COLORS[a.t] || "#64748b";
+    const label = (a.name ? `${esc(a.name)} — ` : "") + `${esc(amenityLabel(a.t))} · ${a.m}m`;
     L.polyline([home, [lat, lng]], { color, weight: 2, opacity: 0.4 }).addTo(amenityLayer);
     L.circleMarker([lat, lng], { radius: 6, color: "#fff", weight: 1.5, fillColor: color, fillOpacity: 0.95 })
-      .bindTooltip(`${esc(amenityLabel(a.t))} · ${a.m}m`, { direction: "top" })
+      .bindTooltip(label, { direction: "top" })
       .addTo(amenityLayer);
   }
 }

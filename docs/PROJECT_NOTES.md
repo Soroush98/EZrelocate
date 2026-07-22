@@ -101,6 +101,23 @@ One concept, edited in more than one place. If you touch one, touch the others:
   Geofabrik downloads (51 files) — the parse is fast now, the download is the
   long pole; cache it.
 
+### 2026-07-22 — POI names bundled for identity categories
+- The offline indexes now carry each POI's OSM name (`<cat>__names` parallel
+  arrays, UTF-8 truncated to 48 bytes) for subway/train/grocery/cafe/pharmacy/
+  school/university/library/gym/hospital. bus_stop + park stay nameless on
+  purpose — they're ~1M of 1.9M rows and identity rarely matters there.
+- Cost: +4.5 MB across the three indexes (11.8 → 16.3 MB total; names compress
+  well). Names flow index → `nearest_batch` → `nearby_amenities[{t,lat,lng,m,
+  name?}]` → dataset + both map tooltips ("Caffè Nero — cafe · 82m"). The
+  Overpass fallback emits names too, for parity.
+- Verified: Trafalgar Sq → Caffè Nero/Boots/Charing Cross; Midtown → Breads
+  Bakery/Whole Foods/Equinox; Toronto Union → Isabella's Donuts/Union Station.
+- Subway ENTRANCE nodes often carry no OSM name (the station node does) — so
+  `subway` hits may be nameless where `train` has the named station. A
+  fall-back-to-parent-station lookup is a possible future builder tweak.
+- CA index rebuilt from Geofabrik for the first time (was the June Postgres
+  export): 225,157 → 259,886 POIs (~13 months of OSM growth).
+
 ### 2026-07-22 — Renamed to `rental-listings-scraper` (store positioning)
 - Store survey: every competitor is single-site (`zumper-rental-scraper`,
   `openrent-property-scraper`, `zillow-rentals-scraper`…) and NOBODY owns the
